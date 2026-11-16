@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # kraken-conformance (the conformance runner), from the repository root:
-#   docker buildx build --ssh default -f conformance/Dockerfile -t kraken-conformance .
+#   docker buildx build --ssh default -t kraken-conformance .
 # The default image carries the runner only. `--target with-reference` adds the Rust reference
 # conformance service (/app/conformance-reference-service), to try the image end to end.
 # The reference service's kraken-messaging-rs is a git dependency named by its ssh URL
@@ -13,14 +13,13 @@ FROM rust:1.99-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY proto ./proto
-COPY conformance/Cargo.toml conformance/Cargo.lock conformance/build.rs ./conformance/
-COPY conformance/src ./conformance/src
-COPY conformance/reference-service/Cargo.toml ./conformance/reference-service/
-COPY conformance/reference-service/src ./conformance/reference-service/src
-COPY conformance/violator/Cargo.toml ./conformance/violator/
-COPY conformance/violator/src ./conformance/violator/src
-WORKDIR /app/conformance
+COPY src ./src
+COPY reference-service/Cargo.toml ./reference-service/
+COPY reference-service/src ./reference-service/src
+COPY violator/Cargo.toml ./violator/
+COPY violator/src ./violator/src
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 # The build container has no known_hosts: the gitlab host key is accepted on first use.
 ENV GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"
@@ -36,8 +35,8 @@ RUN --mount=type=ssh \
 # The runner and the reference service: `run --service-cmd /app/conformance-reference-service`.
 FROM gcr.io/distroless/cc-debian12:nonroot AS with-reference
 WORKDIR /app
-COPY --from=builder /app/conformance/target/release/kraken-conformance /app/kraken-conformance
-COPY --from=reference-builder /app/conformance/target/release/conformance-reference-service /app/conformance-reference-service
+COPY --from=builder /app/target/release/kraken-conformance /app/kraken-conformance
+COPY --from=reference-builder /app/target/release/conformance-reference-service /app/conformance-reference-service
 USER nonroot
 ENTRYPOINT ["/app/kraken-conformance"]
 
@@ -46,6 +45,6 @@ ENTRYPOINT ["/app/kraken-conformance"]
 # image), or copy /app/kraken-conformance into an image that can run your conformance service.
 FROM gcr.io/distroless/cc-debian12:nonroot
 WORKDIR /app
-COPY --from=builder /app/conformance/target/release/kraken-conformance /app/kraken-conformance
+COPY --from=builder /app/target/release/kraken-conformance /app/kraken-conformance
 USER nonroot
 ENTRYPOINT ["/app/kraken-conformance"]

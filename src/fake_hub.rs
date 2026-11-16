@@ -658,7 +658,7 @@ const HUB_INSTANCE_PREFIX: &str = "kraken-hub/";
 /// The service name kraken-hub sends its own requests as.
 const HUB_SERVICE: &str = "kraken-hub";
 
-/// kraken-hub's checks of a stream's first `Register` (src/service.rs), in its order, with the
+/// kraken-hub's checks of a stream's first `Register` (its src/service.rs), in its order, with the
 /// same statuses.
 fn first_register_refusal(r: &Register) -> Option<Status> {
     if r.instance_id.is_empty() || r.service_name.is_empty() {

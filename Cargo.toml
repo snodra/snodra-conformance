@@ -7,9 +7,7 @@ description = "The kraken conformance runner: proves a library's feature level a
 license = "MIT"
 publish = false
 
-# A workspace of its own, next to the hub's package: the hub's build, lock file and image never load
-# the runner or the reference service (and the reference service's library), see the README,
-# "Conformance runner".
+# The runner, the reference conformance service (on kraken-messaging-rs) and the violator.
 [workspace]
 members = [".", "reference-service", "violator"]
 
@@ -21,7 +19,7 @@ name = "kraken-conformance"
 path = "src/main.rs"
 
 [dependencies]
-# The runner speaks hub.proto itself (raw frames), as the hub's own tests do: it never links a
+# The runner speaks hub.proto itself (raw frames), as kraken-hub's own tests do: it never links a
 # kraken library, so it can observe and violate the protocol where a check needs it.
 tonic = { version = "0.14.8", features = ["tls-ring"] }
 tonic-prost = "0.14.8"
