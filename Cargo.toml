@@ -1,0 +1,61 @@
+[package]
+name = "kraken-conformance"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "The kraken conformance runner: proves a library's feature level against a real hub and fake hubs"
+license = "MIT"
+publish = false
+
+# A workspace of its own, next to the hub's package: the hub's build, lock file and image never load
+# the runner or the reference service (and the reference service's library), see the README,
+# "Conformance runner".
+[workspace]
+members = [".", "reference-service", "violator"]
+
+[lib]
+name = "kraken_conformance"
+
+[[bin]]
+name = "kraken-conformance"
+path = "src/main.rs"
+
+[dependencies]
+# The runner speaks hub.proto itself (raw frames), as the hub's own tests do: it never links a
+# kraken library, so it can observe and violate the protocol where a check needs it.
+tonic = { version = "0.14.8", features = ["tls-ring"] }
+tonic-prost = "0.14.8"
+prost = "0.14.4"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+clap = { version = "4.6.7", features = ["derive"] }
+# The checks of caller identity (L1-IDENTITY, L1-PROPAGATION): the runner is the token issuer, with
+# an RSA key made at start and a JWKS endpoint of its own.
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
+rsa = "0.9"
+base64 = "0.23"
+rand = "0.8"
+# L1-TLS: the fake hub serves TLS with a CA the runner makes at start.
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+# The fake hub's TLS uses ring, named explicitly: another dependency (testcontainers, in tests) may
+# enable a second rustls provider, and rustls then cannot pick one by itself.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# Validity periods of the certificates the runner issues (L1-MTLS).
+time = "0.3"
+
+[build-dependencies]
+tonic-prost-build = "0.14.8"
+prost-build = "0.14.4"
+
+[dev-dependencies]
+testcontainers = "0.27"
+
+# RSA key generation is slow unoptimised; the runner makes one key per run.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+[profile.dev.package.rsa]
+opt-level = 3

@@ -1,0 +1,26 @@
+[package]
+name = "kraken-conformance-violator"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "A raw-frame client that breaks one protocol rule per run: the runner's own mutation evidence"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "conformance-violator"
+path = "src/main.rs"
+
+[dependencies]
+kraken-conformance = { path = ".." }
+tonic = { version = "0.14.8", features = ["tls-ring"] }
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-stream = "0.1"
+serde_json = "1"
+base64 = "0.23"
+uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+tower = { version = "0.5", features = ["util"] }
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }

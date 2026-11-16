@@ -1,0 +1,26 @@
+[package]
+name = "kraken-conformance-reference"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "The reference conformance service on kraken-messaging-rs: the runner's fixture and the example for library authors"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "conformance-reference-service"
+path = "src/main.rs"
+
+[dependencies]
+# kraken-messaging-rs by git, pinned to the merged commit of its feat/modular-stores (no release
+# yet): becomes `tag = "v0.5.0"` after the library's release. The ssh URL works on a developer
+# machine with ssh access (CARGO_NET_GIT_FETCH_WITH_CLI=true); CI rewrites it to https with a
+# deploy token (see the README, "Conformance runner").
+kraken-messaging-rs = { git = "ssh://git@local.gitlab.damoreira.ml/kraken-org/kraken-messaging-rs.git", rev = "d66ae06e19cd782d0be1334ff1d62aab83854aa6" }
+tokio = { version = "1.54.1", features = ["full"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
