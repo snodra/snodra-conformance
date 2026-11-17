@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="kraken mascot" src="https://gitlab.damoreira.ml/kraken-org/kraken/-/raw/main/docs/assets/brand/svg/kraken.svg" width="160">
+  <img alt="kraken conformance mascot" src="https://gitlab.damoreira.ml/kraken-org/kraken/-/raw/main/docs/assets/brand/svg/kraken-conformance.svg" width="160">
 </p>
 
 <h1 align="center">kraken-conformance</h1>
