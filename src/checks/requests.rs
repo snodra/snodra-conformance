@@ -506,11 +506,13 @@ pub async fn retry(run: Run) -> CheckResult {
         d.iter().map(|r| r.timeout_ms).collect::<Vec<_>>(),
         error_of(&v)
     );
+    // The break waits a little: the probe and the reply to this conformance.Send share the stream, and the reply
+    // may be written after the probe (as in L1-NEVER-SENT).
     let op = s
         .command(
             "conformance.Send",
             json!({ "op": "unary", "target": "probe", "timeoutMs": 5000, "async": true,
-                    "payload": { "case": "e", "steps": [{ "close": true }, { "reply": {} }] } }),
+                    "payload": { "case": "e", "delayMs": 500, "steps": [{ "close": true }, { "reply": {} }] } }),
         )
         .await
         .or_fail("an asynchronous conformance.Send")?;
