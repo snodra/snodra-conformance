@@ -55,14 +55,18 @@ pub async fn hubs(run: Run) -> CheckResult {
         "two targets answering hub id hub-a: {} streams open, {late} opened in the last 4 s (expected one, stable)",
         live.len()
     );
-    let ra = live[0]
+    // initial_permits is the stream's share of the capacity when it opened (L1-HUB-PERMITS):
+    // a stream reopened after the duplicate target was parked offers a larger share.
+    let mut ra = live[0]
         .register(Duration::ZERO)
         .await
         .or_fail("no Register")?;
-    let rb = sb.register(Duration::ZERO).await.or_fail("no Register")?;
+    let mut rb = sb.register(Duration::ZERO).await.or_fail("no Register")?;
+    ra.initial_permits = 0;
+    rb.initial_permits = 0;
     ensure!(
         ra == rb,
-        "the Registers to the two hubs differ: {ra:?} vs {rb:?}"
+        "the Registers to the two hubs differ apart from initial_permits: {ra:?} vs {rb:?}"
     );
     let v = sb
         .query("conformance.View", json!({}))
@@ -83,7 +87,7 @@ pub async fn hubs(run: Run) -> CheckResult {
     );
     drop((sut, a, b, c));
     if run.options().hubs.len() < 2 {
-        return Ok("one stream per hub id with identical Registers, a duplicate target parked (fake hubs); \
+        return Ok("one stream per hub id with identical Registers apart from initial_permits, a duplicate target parked (fake hubs); \
                    the part on two real hubs did not run (give --hub twice)"
             .into());
     }
@@ -125,7 +129,7 @@ pub async fn hubs(run: Run) -> CheckResult {
         }
     }
     Ok(format!(
-        "one stream per hub id with identical Registers (a duplicate target parked); registered on both real hubs {ids:?}"
+        "one stream per hub id with identical Registers apart from initial_permits (a duplicate target parked); registered on both real hubs {ids:?}"
     ))
 }
 
