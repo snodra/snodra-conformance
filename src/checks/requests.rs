@@ -392,11 +392,13 @@ pub async fn never_sent(run: Run) -> CheckResult {
     s1.until(Duration::from_secs(5), || s1.acked().then_some(()))
         .await
         .or_fail("ack")?;
-    // The hub takes the request, then the stream breaks before an answer.
+    // The hub takes the request, then the stream breaks before an answer. The break waits a
+    // little: the probe and the reply to this conformance.Send share the stream, and the reply
+    // may be written after the probe.
     let op = s1
         .command(
             "conformance.Send",
-            json!({ "op": "unary", "target": "probe", "async": true, "payload": { "close": true } }),
+            json!({ "op": "unary", "target": "probe", "async": true, "payload": { "close": true, "delayMs": 500 } }),
         )
         .await
         .or_fail("an asynchronous conformance.Send")?;
