@@ -178,11 +178,11 @@ impl Ca {
         )
     }
 
-    /// A client certificate naming `service` (`kraken://service/<name>`), valid until `not_after`.
+    /// A client certificate naming `service` (`snodra://service/<name>`), valid until `not_after`.
     fn client(&self, service: &str, not_after: SystemTime) -> Result<Pair, Problem> {
         let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).or_fail("client")?;
         params.subject_alt_names = vec![rcgen::SanType::URI(
-            rcgen::string::Ia5String::try_from(format!("kraken://service/{service}"))
+            rcgen::string::Ia5String::try_from(format!("snodra://service/{service}"))
                 .or_fail("URI SAN")?,
         )];
         params
@@ -218,7 +218,7 @@ fn client_files(run: &Run, name: &str, pair: &Pair) -> Result<(PathBuf, PathBuf)
 }
 
 pub async fn mtls(run: Run) -> CheckResult {
-    let ca = Ca::new("kraken conformance CA")?;
+    let ca = Ca::new("Snodra conformance CA")?;
     let hub = ca.server(HUB_NAME)?;
     let ca_file = run.options().work_dir.join(format!("{}-ca.pem", run.id));
     write(&ca_file, &ca.pem)?;
@@ -309,14 +309,14 @@ pub async fn mtls(run: Run) -> CheckResult {
         "the renewed pair (60 s certificate replaced in the files) was presented {} ms after the files changed, \
          before notAfter, without a restart; after the certificate-expired close, a new stream {} ms later, not a \
          refusal. On the runner's fake hub, which verified the certificates (one of another CA got no stream: the \
-         fixture, not the library), without kraken-hub's check of the service name",
+         fixture, not the library), without snodra-server's check of the service name",
         ms(rolled.started - renewed_at),
         ms(again.started - closed)
     ))
 }
 
 pub async fn tls(run: Run) -> CheckResult {
-    let ca = Ca::new("kraken conformance CA")?;
+    let ca = Ca::new("Snodra conformance CA")?;
     let ca_file = run.options().work_dir.join(format!("{}-ca.pem", run.id));
     write(&ca_file, &ca.pem)?;
     let start = |pair: &Pair, id: &str| {

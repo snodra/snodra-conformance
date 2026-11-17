@@ -1,19 +1,19 @@
-//! `kraken-conformance`: runs the conformance checks of a feature level against a library's
-//! conformance service and prints the report (kraken `protocol/conformance.md`).
+//! `snodra-conformance`: runs the conformance checks of a feature level against a library's
+//! conformance service and prints the report (the conformance contract, `protocol/conformance.md`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use kraken_conformance::checks::{self, Needs, Options};
-use kraken_conformance::report::Report;
+use snodra_conformance::checks::{self, Needs, Options};
+use snodra_conformance::report::Report;
 
 #[derive(Parser)]
 #[command(
-    name = "kraken-conformance",
+    name = "snodra-conformance",
     version,
-    about = "Proves a kraken library's feature level"
+    about = "Proves a client library's Snodra feature level"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -114,13 +114,13 @@ async fn main() -> ExitCode {
                 all.retain(|c| only.iter().any(|id| id == c.id));
             }
             let work_dir = work_dir.unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("kraken-conformance-{}", std::process::id()))
+                std::env::temp_dir().join(format!("snodra-conformance-{}", std::process::id()))
             });
             if let Err(e) = std::fs::create_dir_all(&work_dir) {
                 eprintln!("{}: {e}", work_dir.display());
                 return ExitCode::from(2);
             }
-            eprintln!("[kraken-conformance] logs in {}", work_dir.display());
+            eprintln!("[snodra-conformance] logs in {}", work_dir.display());
             let options = Options {
                 service_cmd,
                 service: service.clone(),
@@ -130,14 +130,14 @@ async fn main() -> ExitCode {
                 startup: Duration::from_secs(startup_timeout),
                 extra_env: service_env,
             };
-            if let Err(e) = kraken_conformance::sut::split_command(&options.service_cmd) {
+            if let Err(e) = snodra_conformance::sut::split_command(&options.service_cmd) {
                 eprintln!("{e}");
                 return ExitCode::from(2);
             }
             match checks::preflight(&options).await {
-                Ok(note) => eprintln!("[kraken-conformance] {note}"),
+                Ok(note) => eprintln!("[snodra-conformance] {note}"),
                 Err(e) => {
-                    eprintln!("[kraken-conformance] {e}");
+                    eprintln!("[snodra-conformance] {e}");
                     return ExitCode::from(2);
                 }
             }

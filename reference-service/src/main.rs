@@ -1,5 +1,5 @@
-//! The reference conformance service: the contract of kraken `protocol/conformance.md` on
-//! kraken-messaging-rs. The runner (`kraken-conformance`) starts it once per check with the
+//! The reference conformance service: the contract of `protocol/conformance.md` on
+//! snodra-messaging-rs. The runner (`snodra-conformance`) starts it once per check with the
 //! `CONFORMANCE_*` environment, drives it through a hub and reads what it reports.
 //!
 //! It is written the way an application would use the library: typed messages, handlers that
@@ -12,13 +12,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
-use kraken_messaging::hub::{ScatterOptions, Sender};
-use kraken_messaging::{
-    Config, Guard, HubOAuth2, HubTls, KrakenMessaging, MessageContext, MessagingError, RetryPolicy,
-    SecretString, SendOptions, StreamOptions, SubscriptionOptions, message_type,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use snodra_messaging::hub::{ScatterOptions, Sender};
+use snodra_messaging::{
+    Config, Guard, HubOAuth2, HubTls, MessageContext, MessagingError, RetryPolicy, SecretString,
+    SendOptions, SnodraMessaging, StreamOptions, SubscriptionOptions, message_type,
+};
 use tokio::sync::Notify;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -73,69 +73,69 @@ json_message!(ProbeStream, "conformance.runner.ProbeStream");
 json_message!(ProbeWatch, "conformance.runner.ProbeWatch");
 json_message!(Missing, "conformance.runner.Missing");
 
-impl kraken_messaging::Command for Echo {
+impl snodra_messaging::Command for Echo {
     type Reply = Value;
 }
-impl kraken_messaging::Query for EchoQuery {
+impl snodra_messaging::Query for EchoQuery {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Done {
+impl snodra_messaging::Command for Done {
     type Reply = ();
 }
-impl kraken_messaging::Command for Sleep {
+impl snodra_messaging::Command for Sleep {
     type Reply = Value;
 }
-impl kraken_messaging::Query for SleepQuery {
+impl snodra_messaging::Query for SleepQuery {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Fail {
+impl snodra_messaging::Command for Fail {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Relay {
+impl snodra_messaging::Command for Relay {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Strict {
+impl snodra_messaging::Command for Strict {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Guarded {
+impl snodra_messaging::Command for Guarded {
     type Reply = Value;
 }
-impl kraken_messaging::Query for SharedQuery {
+impl snodra_messaging::Query for SharedQuery {
     type Reply = Value;
 }
-impl kraken_messaging::StreamingQuery for Stream {
+impl snodra_messaging::StreamingQuery for Stream {
     type Item = Value;
 }
-impl kraken_messaging::SubscriptionQuery for Watch {
+impl snodra_messaging::SubscriptionQuery for Watch {
     type Initial = Value;
     type Update = Value;
 }
-impl kraken_messaging::Command for Emit {
+impl snodra_messaging::Command for Emit {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Send {
+impl snodra_messaging::Command for Send {
     type Reply = Value;
 }
-impl kraken_messaging::Query for Outcome {
+impl snodra_messaging::Query for Outcome {
     type Reply = Value;
 }
-impl kraken_messaging::Query for View {
+impl snodra_messaging::Query for View {
     type Reply = Value;
 }
-impl kraken_messaging::Command for Probe {
+impl snodra_messaging::Command for Probe {
     type Reply = Value;
 }
-impl kraken_messaging::Query for ProbeQuery {
+impl snodra_messaging::Query for ProbeQuery {
     type Reply = Value;
 }
-impl kraken_messaging::StreamingQuery for ProbeStream {
+impl snodra_messaging::StreamingQuery for ProbeStream {
     type Item = Value;
 }
-impl kraken_messaging::SubscriptionQuery for ProbeWatch {
+impl snodra_messaging::SubscriptionQuery for ProbeWatch {
     type Initial = Value;
     type Update = Value;
 }
-impl kraken_messaging::Command for Missing {
+impl snodra_messaging::Command for Missing {
     type Reply = Value;
 }
 
@@ -272,10 +272,10 @@ struct Shared {
     service: String,
     instance: String,
     sender: Arc<Sender>,
-    emitter: kraken_messaging::QueryUpdateEmitter,
+    emitter: snodra_messaging::QueryUpdateEmitter,
     ops: Mutex<HashMap<String, Option<Value>>>,
     op_done: Notify,
-    app: OnceLock<KrakenMessaging>,
+    app: OnceLock<SnodraMessaging>,
 }
 
 #[tokio::main]
@@ -283,13 +283,13 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("info,kraken_messaging=debug")
+                tracing_subscriber::EnvFilter::new("info,snodra_messaging=debug")
             }),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
     let env = Env::read();
-    let builder = KrakenMessaging::builder(env.config())
+    let builder = SnodraMessaging::builder(env.config())
         .await
         .expect("the library refused the configuration");
     let shared = Arc::new(Shared {
@@ -520,7 +520,7 @@ impl Shared {
     }
 
     /// The newest refusal of this instance's registration by any hub, as the library keeps it
-    /// (`KrakenMessaging::latest_rejection`: never cleared by a later acceptance), `CODE: message`.
+    /// (`SnodraMessaging::latest_rejection`: never cleared by a later acceptance), `CODE: message`.
     fn latest_rejection(&self) -> Option<String> {
         let rejection = self.app.get()?.latest_rejection()?;
         Some(format!(

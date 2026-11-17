@@ -1,5 +1,5 @@
 [package]
-name = "kraken-conformance-violator"
+name = "snodra-conformance-violator"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
@@ -12,7 +12,7 @@ name = "conformance-violator"
 path = "src/main.rs"
 
 [dependencies]
-kraken-conformance = { path = ".." }
+snodra-conformance = { path = ".." }
 tonic = { version = "0.14.8", features = ["tls-ring"] }
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-stream = "0.1"

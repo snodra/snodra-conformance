@@ -14,7 +14,7 @@ mod support;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use kraken_conformance::report::{Status, Verdict};
+use snodra_conformance::report::{Status, Verdict};
 
 const CONNECTION: &[&str] = &[
     "L1-REGISTER-FIRST",
@@ -105,7 +105,7 @@ const REFERENCE: &[Mutation] = &[
 ];
 
 const VIOLATIONS: &[Mutation] = &[
-    // A client that never sends a Register first registers nowhere (kraken-hub refuses it too):
+    // A client that never sends a Register first registers nowhere (snodra-server refuses it too):
     // every check of its group fails with it, so only the target is asserted.
     (
         "heartbeat-first",

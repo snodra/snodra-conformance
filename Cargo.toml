@@ -1,26 +1,26 @@
 [package]
-name = "kraken-conformance"
+name = "snodra-conformance"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-description = "The kraken conformance runner: proves a library's feature level against a real hub and fake hubs"
+description = "The Snodra conformance runner: proves a client library's feature level against a real Snodra Server and fake hubs"
 license = "MIT"
 publish = false
 
-# The runner, the reference conformance service (on kraken-messaging-rs) and the violator.
+# The runner, the reference conformance service (on snodra-messaging-rs) and the violator.
 [workspace]
 members = [".", "reference-service", "violator"]
 
 [lib]
-name = "kraken_conformance"
+name = "snodra_conformance"
 
 [[bin]]
-name = "kraken-conformance"
+name = "snodra-conformance"
 path = "src/main.rs"
 
 [dependencies]
-# The runner speaks hub.proto itself (raw frames), as kraken-hub's own tests do: it never links a
-# kraken library, so it can observe and violate the protocol where a check needs it.
+# The runner speaks hub.proto itself (raw frames), as snodra-server's own tests do: it never links a
+# Snodra library, so it can observe and violate the protocol where a check needs it.
 tonic = { version = "0.14.8", features = ["tls-ring"] }
 tonic-prost = "0.14.8"
 prost = "0.14.4"

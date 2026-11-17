@@ -111,7 +111,7 @@ impl Peer {
             query_types: registration.queries.clone(),
             shared_query_types: registration.shared.clone(),
             initial_permits: 4096,
-            client_version: format!("kraken-conformance/{}", crate::RUNNER_VERSION),
+            client_version: format!("snodra-conformance/{}", crate::RUNNER_VERSION),
             ..Register::default()
         })))
         .await
