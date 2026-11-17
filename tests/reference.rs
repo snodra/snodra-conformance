@@ -10,7 +10,7 @@ mod support;
 use kraken_conformance::report::{Report, Status};
 
 /// Checks the reference service fails at the pinned library, with the reason (none at
-/// kraken-messaging-rs d66ae06).
+/// kraken-messaging-rs v0.5.0).
 const KNOWN_FAILURES: &[(&str, &str)] = &[];
 
 fn expect(verdicts: &[kraken_conformance::report::Verdict]) -> Vec<String> {

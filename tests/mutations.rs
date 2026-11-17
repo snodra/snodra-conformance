@@ -269,6 +269,9 @@ async fn matrix(service: PathBuf, var: &str, mutations: &[Mutation]) -> Vec<Stri
             let b = group(&service, var, "", ids).await;
             for v in &b {
                 println!("baseline {:<24}{:<20}{:?}", key, v.id, v.status);
+                if v.status != Status::Pass {
+                    println!("baseline {:<24}{:<20}{}", key, v.id, v.detail);
+                }
             }
             baselines.insert(key, b);
         }
@@ -292,6 +295,10 @@ async fn matrix(service: PathBuf, var: &str, mutations: &[Mutation]) -> Vec<Stri
             let base = support::verdict(baseline, &v.id);
             if v.status != base.status {
                 changed.push(format!("{} {:?}->{:?}", v.id, base.status, v.status));
+                println!(
+                    "MATRIX {name:<24} {:<18} {:?}: {}",
+                    v.id, v.status, v.detail
+                );
             }
         }
         println!(
