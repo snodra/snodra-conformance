@@ -292,6 +292,10 @@ async fn matrix(service: PathBuf, var: &str, mutations: &[Mutation]) -> Vec<Stri
             let base = support::verdict(baseline, &v.id);
             if v.status != base.status {
                 changed.push(format!("{} {:?}->{:?}", v.id, base.status, v.status));
+                println!(
+                    "MATRIX {name:<24} {:<18} {:?}: {}",
+                    v.id, v.status, v.detail
+                );
             }
         }
         println!(
