@@ -269,6 +269,9 @@ async fn matrix(service: PathBuf, var: &str, mutations: &[Mutation]) -> Vec<Stri
             let b = group(&service, var, "", ids).await;
             for v in &b {
                 println!("baseline {:<24}{:<20}{:?}", key, v.id, v.status);
+                if v.status != Status::Pass {
+                    println!("baseline {:<24}{:<20}{}", key, v.id, v.detail);
+                }
             }
             baselines.insert(key, b);
         }
