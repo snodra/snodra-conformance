@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 description = "A raw-frame client that breaks one protocol rule per run: the runner's own mutation evidence"
-license = "MIT"
+license = "Apache-2.0"
 publish = false
 
 [[bin]]
