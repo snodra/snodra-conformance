@@ -12,10 +12,9 @@ name = "conformance-reference-service"
 path = "src/main.rs"
 
 [dependencies]
-# snodra-messaging-rs by git, pinned to its release tag. The ssh URL works on a developer machine
-# with ssh access (CARGO_NET_GIT_FETCH_WITH_CLI=true); CI rewrites it to https with a deploy token
-# (see the README, "The library dependency").
-snodra-messaging-rs = { git = "ssh://git@local.gitlab.damoreira.ml/snodra/snodra-messaging-rs.git", tag = "v0.6.0" }
+# snodra-messaging-rs from crates.io, at the minor the runner tests: the reference service is also the
+# example for library authors, so it takes the artifact a stranger would.
+snodra-messaging-rs = "0.6"
 tokio = { version = "1.54.1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
