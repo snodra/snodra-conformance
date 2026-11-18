@@ -1,9 +1,9 @@
 //! A fake hub: a gRPC server speaking hub.proto that records every frame a library writes and
-//! does what a check scripts. It behaves like kraken-hub wherever a check relies on it (the
+//! does what a check scripts. It behaves like snodra-server wherever a check relies on it (the
 //! handshake and its refusals, the echo after the ack, permits and queueing, later and empty
 //! `Register`s, `NO_HANDLER` for a type nobody serves); the differences that remain are listed in
-//! kraken `docs/libraries/conformance.md` ("How the runner's hub differs from kraken-hub"), and
-//! `tests/consistency.rs` runs one script of frames against both.
+//! the Snodra docs (`docs/libraries/conformance.md`, "How the runner's hub differs from
+//! snodra-server"), and `tests/consistency.rs` runs one script of frames against both.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
@@ -38,7 +38,7 @@ pub enum Mode {
 /// When a session's `Register` is acknowledged.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AckMode {
-    /// At once (kraken-hub).
+    /// At once (snodra-server).
     Auto,
     /// Never: the session stays unacknowledged.
     Never,
@@ -64,7 +64,7 @@ struct Inner {
     ack: Mutex<RegisterAck>,
     mode: Mutex<Mode>,
     ack_mode: Mutex<AckMode>,
-    /// Echo heartbeats before the ack too (kraken-hub never has the chance: it acks at once).
+    /// Echo heartbeats before the ack too (snodra-server never has the chance: it acks at once).
     echo_before_ack: AtomicBool,
     /// Refusals for the next `Register`s, one each, in order (then sessions are accepted).
     refusals: Mutex<VecDeque<(Code, String)>>,
@@ -86,7 +86,7 @@ pub struct FakeHub {
     sockets: Arc<Mutex<Vec<std::net::TcpStream>>>,
 }
 
-/// The `RegisterAck` kraken-hub sends with its defaults (`KRAKEN_HUB_*` unset).
+/// The `RegisterAck` snodra-server sends with its defaults (`SNODRA_SERVER_*` unset).
 pub fn default_ack(hub_id: &str) -> RegisterAck {
     RegisterAck {
         hub_id: hub_id.to_string(),
@@ -326,7 +326,7 @@ pub(crate) async fn until<T>(
     }
 }
 
-/// Flow control as kraken-hub applies it to one session: forwards while it holds permits, queues
+/// Flow control as snodra-server applies it to one session: forwards while it holds permits, queues
 /// the rest in order, `Permits` raises the cap with its grant and adds its count.
 #[derive(Default)]
 struct Permits {
@@ -470,7 +470,7 @@ impl Session {
         self.types.lock().unwrap().clone()
     }
 
-    /// Sends a request to the library as kraken-hub forwards one: a unary or streaming request
+    /// Sends a request to the library as snodra-server forwards one: a unary or streaming request
     /// takes a permit or waits in the session's queue; a subscription target takes none.
     pub fn request(&self, r: Request) -> bool {
         if self.is_closed() {
@@ -519,8 +519,8 @@ impl Session {
     }
 
     /// Cancels a streaming request, a subscription target or a scatter-gather target the fake
-    /// hub forwarded, as kraken-hub does. A command is never cancelled (kraken-hub has no cancel for
-    /// one): nothing is sent and the answer is false.
+    /// hub forwarded, as snodra-server does. A command is never cancelled (snodra-server has no
+    /// cancel for one): nothing is sent and the answer is false.
     pub fn cancel(&self, id: &str, reason: &str) -> bool {
         let kind = self.forwarded.lock().unwrap().get(id).copied();
         if kind == Some(RequestKind::Command as i32) {
@@ -653,13 +653,13 @@ struct Service(Arc<Inner>);
 
 type ConnectStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, Status>> + Send>>;
 
-/// The instance-id prefix of kraken-hub's own request sessions (its hub-originated requests).
-const HUB_INSTANCE_PREFIX: &str = "kraken-hub/";
-/// The service name kraken-hub sends its own requests as.
-const HUB_SERVICE: &str = "kraken-hub";
+/// The instance-id prefix of snodra-server's own request sessions (its hub-originated requests).
+const HUB_INSTANCE_PREFIX: &str = "snodra-server/";
+/// The service name snodra-server sends its own requests as.
+const HUB_SERVICE: &str = "snodra-server";
 
-/// kraken-hub's checks of a stream's first `Register` (its src/service.rs), in its order, with the
-/// same statuses.
+/// snodra-server's checks of a stream's first `Register` (its src/service.rs), in its order, with
+/// the same statuses.
 fn first_register_refusal(r: &Register) -> Option<Status> {
     if r.instance_id.is_empty() || r.service_name.is_empty() {
         return Some(Status::invalid_argument(

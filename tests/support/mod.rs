@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use kraken_conformance::checks::{self, Options};
-use kraken_conformance::report::{Status, Verdict};
+use snodra_conformance::checks::{self, Options};
+use snodra_conformance::report::{Status, Verdict};
 
 /// A binary of the workspace's package `package`, built (once per package) with cargo.
 pub fn binary(package: &str, bin: &str) -> PathBuf {
@@ -29,13 +29,13 @@ pub fn binary(package: &str, bin: &str) -> PathBuf {
 
 pub fn reference_service() -> PathBuf {
     binary(
-        "kraken-conformance-reference",
+        "snodra-conformance-reference",
         "conformance-reference-service",
     )
 }
 
 pub fn violator() -> PathBuf {
-    binary("kraken-conformance-violator", "conformance-violator")
+    binary("snodra-conformance-violator", "conformance-violator")
 }
 
 /// Runs the checks `ids` (all of level 1 when empty) against `service`, with `env` for every
@@ -47,7 +47,7 @@ pub async fn run_with(
     hubs: Vec<String>,
 ) -> Vec<Verdict> {
     let work_dir =
-        std::env::temp_dir().join(format!("kraken-conformance-test-{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("snodra-conformance-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&work_dir).unwrap();
     let options = Options {
         service_cmd: format!("'{}'", service.display()),
@@ -66,7 +66,7 @@ pub async fn run_with(
         all.retain(|c| ids.contains(&c.id));
     }
     let verdicts = checks::run_all(&options, all).await;
-    if std::env::var("KRAKEN_CONFORMANCE_KEEP_LOGS").is_err() {
+    if std::env::var("SNODRA_CONFORMANCE_KEEP_LOGS").is_err() {
         let _ = std::fs::remove_dir_all(&work_dir);
     }
     verdicts
@@ -88,7 +88,7 @@ pub fn status_of(verdicts: &[Verdict], id: &str) -> Status {
     verdict(verdicts, id).status.clone()
 }
 
-/// A `kraken-hub` container (`KRAKEN_HUB_IMAGE`, default `kraken-hub:modular`) and its gRPC
+/// A `snodra-server` container (`SNODRA_SERVER_IMAGE`, default `snodra-server:dev`) and its gRPC
 /// address. Needs Docker.
 pub async fn hub_container() -> (
     testcontainers::ContainerAsync<testcontainers::GenericImage>,
@@ -97,12 +97,12 @@ pub async fn hub_container() -> (
     use testcontainers::ImageExt;
     use testcontainers::core::{IntoContainerPort, WaitFor};
     use testcontainers::runners::AsyncRunner;
-    let image = std::env::var("KRAKEN_HUB_IMAGE").unwrap_or_else(|_| "kraken-hub:modular".into());
+    let image = std::env::var("SNODRA_SERVER_IMAGE").unwrap_or_else(|_| "snodra-server:dev".into());
     let (name, tag) = image.split_once(':').unwrap_or((&image, "latest"));
     let container = testcontainers::GenericImage::new(name, tag)
         .with_exposed_port(7000.tcp())
         .with_wait_for(WaitFor::message_on_stdout("hub listening"))
-        .with_env_var("KRAKEN_HUB_OTLP_ENDPOINT", "")
+        .with_env_var("SNODRA_SERVER_OTLP_ENDPOINT", "")
         .start()
         .await
         .expect("hub container");

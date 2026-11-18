@@ -17,14 +17,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use kraken_conformance::proto::hub_client::HubClient;
-use kraken_conformance::proto::{
+use serde_json::{Value, json};
+use snodra_conformance::proto::hub_client::HubClient;
+use snodra_conformance::proto::{
     ClientMessage, Credentials, Error, Heartbeat, Permits, Register, Reply, ReplyEnd, ReplyPart,
     Request, RequestKind, RequestMode, ServerMessage, client_message, credentials, reply,
     server_message,
 };
-use kraken_conformance::{rendezvous, wire};
-use serde_json::{Value, json};
+use snodra_conformance::{rendezvous, wire};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -466,7 +466,7 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
                     .collect();
                 let _ = tx
                     .send(wire::client(client_message::Message::Status(
-                        kraken_conformance::proto::InstanceStatus {
+                        snodra_conformance::proto::InstanceStatus {
                             connected_hub_ids: hubs,
                             handlers_in_flight: st.in_flight.load(Ordering::SeqCst) as u32,
                             processors: vec![],

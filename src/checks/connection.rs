@@ -1,7 +1,8 @@
 //! One stream: registration, handshake, refusals, heartbeats, reconnect, status.
 //!
-//! Every time bound below names the rule of kraken `docs/libraries/protocol.md` it comes from,
-//! with the tolerance added for scheduling (a cold or busy service must pass).
+//! Every time bound below names the rule of the Snodra protocol docs
+//! (`docs/libraries/protocol.md`) it comes from, with the tolerance added for scheduling (a cold
+//! or busy service must pass).
 
 use std::time::{Duration, Instant};
 
@@ -100,7 +101,8 @@ pub async fn handshake_ack(run: Run) -> CheckResult {
     let fake = FakeHub::start("fake-hub-1").await;
     scripted(&fake);
     fake.set_ack_mode(AckMode::Never);
-    // The check's own deviation from kraken-hub: echoes without an ack ("whatever echoes it got").
+    // The check's own deviation from snodra-server: echoes without an ack ("whatever echoes it
+    // got").
     fake.echo_before_ack(true);
     let sut = run.launch(&run.spec(vec![fake.address()]))?;
     let s0 = run.registered(&sut, &fake, 0).await?;
@@ -178,7 +180,7 @@ pub async fn early_requests(run: Run) -> CheckResult {
     spec.capacity = 1;
     let sut = run.launch(&spec)?;
     let s0 = run.registered(&sut, &fake, 0).await?;
-    // Two requests before the ack with one permit: the fake hub (as kraken-hub) forwards the
+    // Two requests before the ack with one permit: the fake hub (as snodra-server) forwards the
     // second only once the first one's permit came back, also before the ack.
     let (a, b) = tokio::join!(
         s0.command("conformance.Echo", json!({ "early": 1 })),

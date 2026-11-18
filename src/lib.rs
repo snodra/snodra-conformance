@@ -1,4 +1,5 @@
-//! `kraken-conformance`: proves a kraken library's feature level (kraken `protocol/conformance.md`).
+//! `snodra-conformance`: proves a client library's feature level (the conformance contract,
+//! `protocol/conformance.md`; the Snodra docs: <https://snodra.damoreira.com/>).
 //!
 //! The runner starts the library's conformance service once per check (`--service-cmd`, with the
 //! `CONFORMANCE_*` environment) and connects it to a real hub (`--hub`) or to fake hubs it runs
@@ -6,7 +7,7 @@
 //! sees every one), the answers it gives and what it reports through the `conformance.*` types.
 
 pub mod proto {
-    tonic::include_proto!("kraken.hub.v1");
+    tonic::include_proto!("snodra.hub.v1");
 }
 
 pub mod checks;

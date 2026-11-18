@@ -1,4 +1,4 @@
-//! The reference service against real hubs (`kraken-hub:modular` by default, `KRAKEN_HUB_IMAGE`
+//! The reference service against real hubs (`snodra-server:dev` by default, `SNODRA_SERVER_IMAGE`
 //! to change it) and the runner's fake hubs: the whole level on one hub, then the two-hub part of
 //! L1-HUBS on two. Needs Docker.
 //!
@@ -7,13 +7,13 @@
 
 mod support;
 
-use kraken_conformance::report::{Report, Status};
+use snodra_conformance::report::{Report, Status};
 
 /// Checks the reference service fails at the pinned library, with the reason (none at
-/// kraken-messaging-rs v0.5.0).
+/// snodra-messaging-rs v0.5.0).
 const KNOWN_FAILURES: &[(&str, &str)] = &[];
 
-fn expect(verdicts: &[kraken_conformance::report::Verdict]) -> Vec<String> {
+fn expect(verdicts: &[snodra_conformance::report::Verdict]) -> Vec<String> {
     let mut wrong = Vec::new();
     for v in verdicts {
         let expected = if KNOWN_FAILURES.iter().any(|(id, _)| *id == v.id) {

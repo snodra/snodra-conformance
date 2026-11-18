@@ -1,5 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // The vendored copy of kraken's protocol/hub.proto (kept byte-identical by
+    // The vendored copy of snodra-server's proto/hub.proto (kept byte-identical by
     // scripts/check-proto-sync.sh).
     println!("cargo:rerun-if-changed=proto/hub.proto");
     tonic_prost_build::configure()
