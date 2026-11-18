@@ -186,7 +186,7 @@ pub async fn scatter(run: Run) -> CheckResult {
     // A target cancelled by the hub stops and sends nothing more.
     let rig = run.on_fake(|_| {}).await?;
     let s = &rig.session;
-    // A scatter-gather target: `<id>#<n>`, a unary query (kraken-hub cancels only queries).
+    // A scatter-gather target: `<id>#<n>`, a unary query (snodra-server cancels only queries).
     s.request(wire::request(
         "gather-1#0",
         RequestKind::Query,

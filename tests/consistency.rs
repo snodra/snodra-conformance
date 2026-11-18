@@ -1,25 +1,25 @@
-//! The fake hub cannot drift from kraken-hub unnoticed: one script of frames (the handshake, a
+//! The fake hub cannot drift from snodra-server unnoticed: one script of frames (the handshake, a
 //! heartbeat, unary requests the hub answers itself, the refusals of a first frame (with their
 //! status messages; the hub's own instance prefix and service name among them), permits and
 //! queueing with a grant raising the cap, a later Register's ack, Cancel for a stream and none for
-//! a command, a half-close) runs against a fake hub and against `kraken-hub:modular` (Docker), and
-//! both must yield the same observable sequence. What the fake hub deliberately does differently is listed in kraken
-//! docs/libraries/conformance.md.
+//! a command, a half-close) runs against a fake hub and against `snodra-server:dev` (Docker), and
+//! both must yield the same observable sequence. What the fake hub deliberately does differently
+//! is listed in the Snodra docs (`docs/libraries/conformance.md`).
 
 mod support;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use kraken_conformance::fake_hub::FakeHub;
-use kraken_conformance::peer::{Peer, Registration};
-use kraken_conformance::proto::hub_client::HubClient;
-use kraken_conformance::proto::{
+use serde_json::json;
+use snodra_conformance::fake_hub::FakeHub;
+use snodra_conformance::peer::{Peer, Registration};
+use snodra_conformance::proto::hub_client::HubClient;
+use snodra_conformance::proto::{
     ClientMessage, Heartbeat, Permits, Register, RequestKind, RequestMode, ServerMessage,
     client_message, server_message,
 };
-use kraken_conformance::wire;
-use serde_json::json;
+use snodra_conformance::wire;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -138,13 +138,13 @@ async fn script(addr: &str) -> Vec<Vec<String>> {
         // The hub's own identity (its hub-originated requests): reserved instance prefix, service.
         session(
             addr,
-            vec![register_as("consistency", "kraken-hub/consistency-1", 4)],
+            vec![register_as("consistency", "snodra-server/consistency-1", 4)],
             vec![],
         )
         .await,
         session(
             addr,
-            vec![register_as("kraken-hub", "consistency-2", 4)],
+            vec![register_as("snodra-server", "consistency-2", 4)],
             vec![],
         )
         .await,
@@ -186,10 +186,10 @@ impl Handler {
                             };
                             let _ = reply
                                 .send(wire::client(client_message::Message::Reply(
-                                    kraken_conformance::proto::Reply {
+                                    snodra_conformance::proto::Reply {
                                         request_id: r.id.clone(),
                                         result: Some(
-                                            kraken_conformance::proto::reply::Result::Payload(
+                                            snodra_conformance::proto::reply::Result::Payload(
                                                 b"{}".to_vec(),
                                             ),
                                         ),
@@ -293,7 +293,7 @@ fn handler_describe(m: &ServerMessage) -> Option<String> {
     }
 }
 
-/// Who sends to the handler: kraken-hub's sender instance, or the fake hub itself.
+/// Who sends to the handler: snodra-server's sender instance, or the fake hub itself.
 enum Driver {
     Fake(Arc<FakeHub>),
     Real(Peer),
@@ -307,7 +307,7 @@ impl Driver {
         r.timeout_ms = 30_000;
         match self {
             Driver::Fake(f) => {
-                // kraken-hub forwards a stream under `<id>#1`.
+                // snodra-server forwards a stream under `<id>#1`.
                 if mode == RequestMode::Streaming {
                     r.id = format!("{id}#1");
                 }
@@ -328,7 +328,7 @@ impl Driver {
                 f.live().unwrap().cancel(&id, "consistency");
             }
             Driver::Real(p) => p.send(client_message::Message::Cancel(
-                kraken_conformance::proto::Cancel {
+                snodra_conformance::proto::Cancel {
                     request_id: id.into(),
                     reason: "consistency".into(),
                 },
@@ -410,7 +410,7 @@ async fn flow(addr: &str, driver: &Driver) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_fake_hub_answers_the_script_as_kraken_hub_does() {
+async fn the_fake_hub_answers_the_script_as_snodra_server_does() {
     let fake = FakeHub::start("fake-hub-consistency").await;
     let from_fake = script(&fake.address()).await;
     let fake = Arc::new(FakeHub::start("fake-hub-consistency-2").await);

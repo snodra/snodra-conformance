@@ -1,4 +1,5 @@
-//! The level-1 checks, one function per id of kraken `docs/libraries/feature-levels.md`.
+//! The level-1 checks, one function per id of the Snodra feature levels
+//! (`docs/libraries/feature-levels.md`).
 //!
 //! Every check starts its own instances of the service under test (fresh processes, fresh
 //! instance ids), its own fake hubs, and is bounded in time; nothing is shared between checks
@@ -267,7 +268,7 @@ pub async fn run_all(options: &Options, checks: Vec<Check>) -> Vec<Verdict> {
                 "needs a second hub (--hub twice)".to_string(),
             ),
             _ => {
-                eprintln!("[kraken-conformance] {} ...", check.id);
+                eprintln!("[snodra-conformance] {} ...", check.id);
                 let run = Run {
                     shared: Arc::clone(&shared),
                     id: check.id,
@@ -302,7 +303,7 @@ pub async fn run_all(options: &Options, checks: Vec<Check>) -> Vec<Verdict> {
                 sut.stop(Duration::from_secs(5)).await;
             }
         }
-        eprintln!("[kraken-conformance] {} {:?}", check.id, status);
+        eprintln!("[snodra-conformance] {} {:?}", check.id, status);
         verdicts.push(Verdict {
             id: check.id.to_string(),
             status,

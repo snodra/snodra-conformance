@@ -114,7 +114,7 @@ impl Report {
 
     pub fn text(&self) -> String {
         let mut out = format!(
-            "kraken-conformance {} (conformance version {}), service {}, level {}\n\n",
+            "snodra-conformance {} (conformance version {}), service {}, level {}\n\n",
             self.runner_version,
             self.conformance_version,
             escape(&self.service),
