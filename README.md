@@ -11,7 +11,6 @@
 <p align="center">
   <a href="https://github.com/snodra/snodra-conformance/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/snodra/snodra-conformance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/snodra/snodra-conformance/releases"><img alt="release" src="https://img.shields.io/github/v/release/snodra/snodra-conformance"></a>
-  <a href="https://hub.docker.com/r/snodra/snodra-conformance"><img alt="docker" src="https://img.shields.io/docker/v/snodra/snodra-conformance?label=docker"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.99.1-000000?logo=rust&logoColor=white">
   <a href="https://snodra.damoreira.com/"><img alt="docs" src="https://img.shields.io/badge/docs-snodra.damoreira.com-0B5FFF"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
@@ -40,23 +39,23 @@ Levels 2 to 4 are proved by the libraries' own event-store and message-store con
 ## Run it
 
 The runner has two subcommands: `run` (the checks) and `list` (the check ids and what each needs).
-`run` needs `--service-cmd`, the command that starts one instance of your conformance service; `--hub host:port`
-(twice for the two-hub check) adds a real hub, and the checks that need one are skipped without it.
+`run` needs `--service-cmd`, the command that starts one instance of your conformance service. Add
+`--hub host:port` (twice for the two-hub check) for a real hub: without one, the checks that need a real hub
+are skipped, and a skipped check leaves the level unproved.
+
+From a checkout, against a hub on `127.0.0.1:7000`:
 
 ```sh
-docker run --rm snodra/snodra-conformance:latest \
-  run --service-cmd "/path/to/conformance-service"
+cargo run --release -- run --hub 127.0.0.1:7000 --service-cmd "/path/to/conformance-service"
+cargo run --release -- list
 ```
 
-The image is distroless and has no shell: `--service-cmd` must name a program inside it (mount your service,
-or build an image `FROM` it). Or from a checkout, against a hub on `127.0.0.1:7000`:
+Or build once with `cargo build --release` and run `target/release/snodra-conformance run ...`.
+`run --help` lists every option. Every check starts its own service process and cleans up.
 
-```sh
-cargo run -q -- run --hub 127.0.0.1:7000 --service-cmd "/path/to/conformance-service"
-cargo run -q -- list
-```
-
-Every check starts its own service process and cleans up. `cargo run -q -- run --help` lists every option.
+The release workflow builds a container image of the runner on a `v*` tag; none is published today. That image
+is distroless and has no shell, so with it `--service-cmd` must name a program inside the image (mount your
+service, or build an image `FROM` it).
 
 ## Documentation
 
