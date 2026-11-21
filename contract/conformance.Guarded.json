@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Guarded.json",
+  "title": "conformance.Guarded",
+  "description": "Requires an authenticated caller (the authorization header, validated against CONFORMANCE_JWKS_URL and CONFORMANCE_ISSUER, before decoding); refuses sub conformance-refused with PERMISSION_DENIED.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": [
+        "count",
+        "user"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "user": {
+          "type": "string",
+          "description": "the caller's sub"
+        }
+      }
+    }
+  }
+}

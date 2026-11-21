@@ -57,6 +57,8 @@ service process and cleans up.
 
 ## Documentation
 
+The conformance contract (the `conformance.*` message types a conformance service handles, and what each check does to it) is [docs/contract.md](docs/contract.md), with one JSON Schema per type in [contract/](contract/).
+
 The checks, the contract and the feature levels: **<https://snodra.damoreira.com/tools/conformance-runner/>**
 and <https://snodra.damoreira.com/server/protocol/>.
 

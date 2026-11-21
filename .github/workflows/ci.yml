@@ -38,6 +38,13 @@ jobs:
       - name: hub.proto must equal the server's
         run: SNODRA_PROTO_SYNC_REQUIRED=true SNODRA_PROTO_SOURCE="$GITHUB_WORKSPACE/server/proto/hub.proto" bash scripts/check-proto-sync.sh
 
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: the contract and its schemas agree
+        run: bash scripts/check-contract.sh
+
   clippy:
     runs-on: ubuntu-latest
     steps:

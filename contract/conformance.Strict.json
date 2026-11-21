@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Strict.json",
+  "title": "conformance.Strict",
+  "description": "A typed payload: anything that does not decode to an integer count is INVALID_REQUEST.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

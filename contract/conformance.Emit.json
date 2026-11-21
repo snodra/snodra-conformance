@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Emit.json",
+  "title": "conformance.Emit",
+  "description": "Emits each value as an update to every conformance.Watch subscription of topic this instance serves, then completes them (complete) or fails them with HANDLER_ERROR (fail).",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "topic"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "fail": {
+          "type": "string"
+        }
+      }
+    },
+    "answer": {
+      "const": {}
+    }
+  }
+}
