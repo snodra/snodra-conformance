@@ -59,7 +59,9 @@ cargo run --release -- list
 Or build once with `cargo build --release` and run `target/release/snodra-conformance run ...`.
 `run --help` lists every option. Every check starts its own service process and cleans up.
 
-The release workflow builds a container image of the runner on a `v*` tag; none is published today. That image
+Each release also publishes binaries for Linux and macOS on the
+[releases page](https://github.com/snodra/snodra-conformance/releases) and the container image
+`snodra/snodra-conformance` (`docker pull snodra/snodra-conformance`). That image
 is distroless and has no shell, so with it `--service-cmd` must name a program inside the image (mount your
 service, or build an image `FROM` it).
 
