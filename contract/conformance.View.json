@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.View.json",
+  "title": "conformance.View",
+  "description": "The instance's own view of its connections.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "query_types"
+  },
+  "$defs": {
+    "payload": {
+      "description": "any JSON value"
+    },
+    "answer": {
+      "type": "object",
+      "required": [
+        "service",
+        "instanceId",
+        "hubIds",
+        "lastRejection",
+        "subscriptionsServed",
+        "retry"
+      ],
+      "properties": {
+        "service": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "hubIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "RegisterAck.hub_id of every hub this instance counts as registered (acknowledged) now"
+        },
+        "lastRejection": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the latest Register refusal the library exposes (its status message at least), by any means: its API, or its log"
+        },
+        "subscriptionsServed": {
+          "type": "integer",
+          "description": "subscriptions this instance serves now"
+        },
+        "retry": {
+          "type": "boolean",
+          "description": "required: whether the library applies a retry policy to its sends (configured from CONFORMANCE_RETRY_*); false skips L1-RETRY, an absent value fails it"
+        }
+      }
+    }
+  }
+}

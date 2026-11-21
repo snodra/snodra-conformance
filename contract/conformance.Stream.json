@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Stream.json",
+  "title": "conformance.Stream",
+  "description": "A streaming query: count items {n: 1..count}, each after delayMs.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "streaming",
+    "servedBy": "service",
+    "registeredIn": "query_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "n"
+      ],
+      "properties": {
+        "n": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

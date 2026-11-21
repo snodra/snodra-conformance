@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.runner.ProbeWatch.json",
+  "title": "conformance.runner.ProbeWatch",
+  "description": "A subscription the runner answers part by part.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "subscription",
+    "servedBy": "runner",
+    "registeredIn": "query_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "description": "fake hubs only: how the runner answers this request (conformance.md, Scripted answers); the service passes the payload unchanged",
+      "properties": {
+        "reply": {
+          "description": "answer this payload"
+        },
+        "hubError": {
+          "type": "integer",
+          "description": "answer ServerMessage.error with this ErrorCode number (and message)"
+        },
+        "message": {
+          "type": "string"
+        },
+        "replyError": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "string"
+            }
+          },
+          "description": "answer a Reply carrying this handler error"
+        },
+        "silent": {
+          "const": true,
+          "description": "never answer"
+        },
+        "close": {
+          "const": true,
+          "description": "close the stream the request came on (UNAVAILABLE)"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "case": {
+          "type": "string",
+          "description": "names the request for the runner (attempts, matching)"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "one script per attempt of the same case; the last repeats"
+        },
+        "byHub": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "description": "a script per fake hub id"
+        }
+      }
+    },
+    "initial": {
+      "description": "any JSON value"
+    },
+    "update": {
+      "description": "any JSON value"
+    }
+  }
+}

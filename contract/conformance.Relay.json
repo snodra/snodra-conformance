@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Relay.json",
+  "title": "conformance.Relay",
+  "description": "Inside its handler, sends payload as a command to conformance.runner.Probe (target probe) or conformance.runner.Missing (target missing) with the library's sender and default options, and fails the way an application does when that call fails (rethrows).",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "enum": [
+            "probe",
+            "missing"
+          ]
+        },
+        "payload": {
+          "description": "any JSON value"
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "reply": {
+          "description": "any JSON value"
+        }
+      }
+    }
+  }
+}

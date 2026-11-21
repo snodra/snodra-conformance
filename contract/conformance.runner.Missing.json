@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.runner.Missing.json",
+  "title": "conformance.runner.Missing",
+  "description": "Served by nobody: a call to it fails with NO_HANDLER (on a fake hub, as its payload scripts).",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "nobody",
+    "registeredIn": null
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "description": "fake hubs only: how the runner answers this request (conformance.md, Scripted answers); the service passes the payload unchanged",
+      "properties": {
+        "reply": {
+          "description": "answer this payload"
+        },
+        "hubError": {
+          "type": "integer",
+          "description": "answer ServerMessage.error with this ErrorCode number (and message)"
+        },
+        "message": {
+          "type": "string"
+        },
+        "replyError": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "string"
+            }
+          },
+          "description": "answer a Reply carrying this handler error"
+        },
+        "silent": {
+          "const": true,
+          "description": "never answer"
+        },
+        "close": {
+          "const": true,
+          "description": "close the stream the request came on (UNAVAILABLE)"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "case": {
+          "type": "string",
+          "description": "names the request for the runner (attempts, matching)"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "one script per attempt of the same case; the last repeats"
+        },
+        "byHub": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "description": "a script per fake hub id"
+        }
+      }
+    }
+  }
+}

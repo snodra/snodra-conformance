@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Echo.json",
+  "title": "conformance.Echo",
+  "description": "Answers what it got: the payload, the headers, the instance.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "description": "any JSON value"
+    },
+    "answer": {
+      "type": "object",
+      "required": [
+        "payload",
+        "headers",
+        "instanceId"
+      ],
+      "properties": {
+        "payload": {
+          "description": "the request's payload, unchanged"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "every Request.headers entry the handler saw"
+        },
+        "instanceId": {
+          "type": "string",
+          "description": "the instance that handled it (CONFORMANCE_INSTANCE_ID)"
+        },
+        "requestId": {
+          "type": "string",
+          "description": "Request.id as the handler saw it, when the library exposes it"
+        }
+      }
+    }
+  }
+}

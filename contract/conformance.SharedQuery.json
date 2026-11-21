@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.SharedQuery.json",
+  "title": "conformance.SharedQuery",
+  "description": "A query registered in Register.shared_query_types.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "shared_query_types"
+  },
+  "$defs": {
+    "payload": {
+      "description": "any JSON value"
+    },
+    "answer": {
+      "type": "object",
+      "required": [
+        "service",
+        "instanceId"
+      ],
+      "properties": {
+        "service": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

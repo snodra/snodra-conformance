@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Outcome.json",
+  "title": "conformance.Outcome",
+  "description": "The outcome of an asynchronous conformance.Send, waiting up to waitMs for it.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "query_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "opId"
+      ],
+      "properties": {
+        "opId": {
+          "type": "string"
+        },
+        "waitMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "answer": {
+      "oneOf": [
+        {
+          "$ref": "conformance.Send.json#/$defs/outcome"
+        },
+        {
+          "type": "object",
+          "required": [
+            "pending"
+          ],
+          "properties": {
+            "pending": {
+              "const": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "unknownOp"
+          ],
+          "properties": {
+            "unknownOp": {
+              "type": "string",
+              "description": "the opId the service does not know"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

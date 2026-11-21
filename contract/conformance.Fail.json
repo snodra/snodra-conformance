@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Fail.json",
+  "title": "conformance.Fail",
+  "description": "Always fails, as a handler raising an application error: HANDLER_ERROR, Error.message containing message, Error.details the JSON text of details.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "description": "any JSON value"
+        }
+      }
+    },
+    "answer": {
+      "not": {},
+      "description": "never answers a payload"
+    }
+  }
+}

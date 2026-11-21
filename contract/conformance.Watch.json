@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Watch.json",
+  "title": "conformance.Watch",
+  "description": "A subscription query by topic: the initial result {topic, value 0, instanceId}; updates {topic, value} come from conformance.Emit.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "query",
+    "mode": "subscription",
+    "servedBy": "service",
+    "registeredIn": "query_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "topic"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string"
+        }
+      }
+    },
+    "initial": {
+      "type": "object",
+      "required": [
+        "topic",
+        "value",
+        "instanceId"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "value": {
+          "const": 0
+        },
+        "instanceId": {
+          "type": "string"
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "required": [
+        "topic",
+        "value"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "value": {
+          "description": "any JSON value"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Done.json",
+  "title": "conformance.Done",
+  "description": "A command without a result.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "description": "any JSON value"
+    },
+    "answer": {
+      "const": {},
+      "description": "exactly {}"
+    }
+  }
+}

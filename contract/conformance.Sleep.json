@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Sleep.json",
+  "title": "conformance.Sleep",
+  "description": "Sleeps, then answers (permits, cancel, in-flight handlers).",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "properties": {
+        "ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": [
+        "instanceId",
+        "sleptMs"
+      ],
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "sleptMs": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

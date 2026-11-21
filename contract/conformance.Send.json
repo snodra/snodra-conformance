@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conformance.Send.json",
+  "title": "conformance.Send",
+  "description": "Makes the library send a request as an application would (the library's sender, the given options) and report the outcome.",
+  "x-snodra": {
+    "conformanceVersion": 1,
+    "kind": "command",
+    "mode": "unary",
+    "servedBy": "service",
+    "registeredIn": "command_types"
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "op",
+        "target"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "unary",
+            "scatter",
+            "stream",
+            "subscribe"
+          ]
+        },
+        "target": {
+          "enum": [
+            "probe",
+            "probe-query",
+            "missing",
+            "echo",
+            "echo-query",
+            "shared-query",
+            "probe-stream",
+            "stream",
+            "probe-watch",
+            "watch"
+          ],
+          "description": "probe: conformance.runner.Probe (command); probe-query: conformance.runner.ProbeQuery; missing: conformance.runner.Missing; echo, echo-query, shared-query: the service's own types; probe-stream: conformance.runner.ProbeStream; stream: conformance.Stream; probe-watch: conformance.runner.ProbeWatch; watch: conformance.Watch"
+        },
+        "payload": {
+          "description": "the request's payload (for the runner's types often a script)"
+        },
+        "routingKey": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "the caller's timeout; absent: the caller chose none"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "headers the caller adds through the library's generic header option"
+        },
+        "retry": {
+          "type": "object",
+          "required": [
+            "maxAttempts"
+          ],
+          "properties": {
+            "maxAttempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "initialBackoffMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "optional: a retry policy for this call only, for a library that takes one per call (answer result unsupported otherwise). The runner sets the policy for every send with CONFORMANCE_RETRY_* instead"
+        },
+        "initialCredit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxResults": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "read": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "stream, subscribe: stop after this many items (the initial result counts) and drop the stream or subscription"
+        },
+        "readDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "async": {
+          "type": "boolean",
+          "description": "answer {opId} at once; the outcome comes from conformance.Outcome"
+        }
+      }
+    },
+    "answer": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/outcome"
+        },
+        {
+          "type": "object",
+          "required": [
+            "opId"
+          ],
+          "properties": {
+            "opId": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "required": [
+        "result",
+        "elapsedMs"
+      ],
+      "properties": {
+        "result": {
+          "enum": [
+            "ok",
+            "error",
+            "unsupported"
+          ],
+          "description": "unsupported: the library cannot do what was asked (reason says what); the check that asked then fails"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "payload": {
+          "description": "unary: the decoded reply ({} for a command without a result)"
+        },
+        "items": {
+          "type": "array",
+          "description": "stream: the items in order; subscribe: the initial result, then the updates; also the items read before an error"
+        },
+        "end": {
+          "enum": [
+            "completed",
+            "stopped"
+          ],
+          "description": "completed: the stream or subscription ended; stopped: the caller stopped after read items (the library cancelled it)"
+        },
+        "parts": {
+          "type": "array",
+          "description": "scatter: one per answer, in arrival order",
+          "items": {
+            "type": "object",
+            "required": [
+              "service",
+              "instance",
+              "ok"
+            ],
+            "properties": {
+              "service": {
+                "type": "string"
+              },
+              "instance": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "payload": {
+                "description": "any JSON value"
+              },
+              "error": {
+                "$ref": "#/$defs/error"
+              }
+            }
+          }
+        },
+        "failed": {
+          "type": "integer",
+          "description": "scatter: parts that are errors"
+        },
+        "timedOut": {
+          "type": "integer",
+          "description": "scatter: ReplyEnd.timed_out"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "description": "from the call to its outcome"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "never-sent",
+            "outcome-unknown",
+            "code",
+            "lost-parts",
+            "refused",
+            "local"
+          ],
+          "description": "never-sent: the request was never handed to a stream's transport (no acknowledged stream, or still in the library's own buffer when the stream broke); outcome-unknown: handed to the transport, then the hub stream broke before the answer - also a stream or subscription the library sent whose hub stream was lost; code: an ErrorCode reached the caller, from the hub or a handler, and the library's local guard timeout, which is ErrorCode TIMEOUT (code says which); lost-parts: the library detected a gap in ReplyPart.seq or a ReplyEnd.parts above the parts received; refused: the library refused the call before sending it (a header it owns, ...); local: any other local failure"
+        },
+        "code": {
+          "enum": [
+            "NO_HANDLER",
+            "TIMEOUT",
+            "HANDLER_DISCONNECTED",
+            "HANDLER_ERROR",
+            "UNAUTHENTICATED",
+            "INVALID_REQUEST",
+            "PERMISSION_DENIED",
+            "RESOURCE_EXHAUSTED",
+            "CANCELLED",
+            null
+          ],
+          "description": "for kind code: the ErrorCode name the caller got (an unknown code reads as HANDLER_ERROR)"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the error's message as the caller sees it"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Error.details as UTF-8 text, when the caller kept them"
+        }
+      }
+    }
+  }
+}
