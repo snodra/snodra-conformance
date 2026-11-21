@@ -39,21 +39,24 @@ Levels 2 to 4 are proved by the libraries' own event-store and message-store con
 
 ## Run it
 
-```sh
-docker run --rm \
-  -e SNODRA_SERVER_ADDRESS=static://snodra-server:7000 \
-  snodra/snodra-conformance:0.2.0 \
-  --service-cmd "/path/to/conformance-service"
-```
-
-Or from a checkout, against the examples' conformance service:
+The runner has two subcommands: `run` (the checks) and `list` (the check ids and what each needs).
+`run` needs `--service-cmd`, the command that starts one instance of your conformance service; `--hub host:port`
+(twice for the two-hub check) adds a real hub, and the checks that need one are skipped without it.
 
 ```sh
-cargo run -- --service-cmd "../snodra-messaging/examples/conformance-service/build/install/conformance-service/bin/conformance-service"
+docker run --rm snodra/snodra-conformance:latest \
+  run --service-cmd "/path/to/conformance-service"
 ```
 
-It needs a running server (set `SNODRA_SERVER_IMAGE` or pass `--server`); every check starts its own
-service process and cleans up.
+The image is distroless and has no shell: `--service-cmd` must name a program inside it (mount your service,
+or build an image `FROM` it). Or from a checkout, against a hub on `127.0.0.1:7000`:
+
+```sh
+cargo run -q -- run --hub 127.0.0.1:7000 --service-cmd "/path/to/conformance-service"
+cargo run -q -- list
+```
+
+Every check starts its own service process and cleans up. `cargo run -q -- run --help` lists every option.
 
 ## Documentation
 
