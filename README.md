@@ -27,10 +27,16 @@ It starts the library's **conformance service** — the fixed `conformance.*` me
 conformance contract — connects it to a real Snodra Server and to fake hubs of its own, and reports
 **PASS**, **FAIL**, **SKIPPED** or **NOT IMPLEMENTED** per check id of the Snodra feature levels.
 
-- **Real server checks**: registration, routing, deadlines, errors, streaming and subscription queries.
-- **Fake hubs**: the protocol edge cases a healthy server never produces — wrong correlation ids, late
-  replies, closed streams, duplicate registrations.
-- **Mutation matrix**: the runner mutates each protocol field and asserts the client rejects it.
+- **Fake hubs** prove most checks, scripting what a healthy server rarely or never produces: the
+  handshake and its refusals, heartbeats, silent hubs and reconnects, timeouts, every error code,
+  never-sent and unknown outcomes, retries, permits, streaming and subscription credit, lost streams,
+  credentials (token, JWT, client certificates, TLS), and routing, permits and failover over two hubs.
+- **Real server checks**: an idle instance stays registered, commands and point queries through the
+  hub with a routing key, shared query types, scatter-gather, and the topology of two real hubs.
+- **Mutation matrix**: deliberately broken services (the reference service broken at its contract
+  boundary, and `violator/`, a client that breaks one protocol rule at a time) each make the check that
+  proves the broken rule fail, and leave the other checks of its group with their usual verdict
+  (`tests/mutations.rs`).
 - **Any language**: the contract is `conformance.*` messages, so a new client is tested the same way.
 - **Reports**: one line per check id, a machine-readable summary, and a non-zero exit on any failure.
 
@@ -61,8 +67,9 @@ service, or build an image `FROM` it).
 
 The conformance contract (the `conformance.*` message types a conformance service handles, and what each check does to it) is [docs/contract.md](docs/contract.md), with one JSON Schema per type in [contract/](contract/).
 
-The checks, the contract and the feature levels: **<https://snodra.damoreira.com/tools/conformance-runner/>**
-and <https://snodra.damoreira.com/server/protocol/>.
+The checks and the feature levels they prove: **<https://snodra.damoreira.com/library-authors/conformance/>**
+and <https://snodra.damoreira.com/library-authors/feature-levels/>. The runner's page among the tools:
+<https://snodra.damoreira.com/tools/conformance-runner/>.
 
 ## Contributing
 
