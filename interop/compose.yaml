@@ -1,0 +1,58 @@
+# One real hub and one conformance service per language, all as service `conformance-interop`
+# (instance id = the language). Run through run.sh.
+name: snodra-interop
+
+x-service: &service
+  depends_on:
+    hub:
+      condition: service_started
+  restart: "no"
+
+services:
+  hub:
+    image: snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.5.4}
+    # The driver, on the host, talks to the hub here. On macOS port 7000 is held by the AirPlay
+    # Receiver: set SNODRA_HUB_PORT (for example 17000).
+    ports:
+      - "127.0.0.1:${SNODRA_HUB_PORT:-7000}:7000"
+
+  go:
+    <<: *service
+    build:
+      context: images/go
+      # The Go service is built from a pinned commit of snodra-messaging-go (there is no release
+      # tag yet). To change at release: replace the commit after `#` with the tag, `v0.1.0`.
+      # GO_REF overrides the ref (for example GO_REF=main); GO_SRC names a local checkout instead.
+      additional_contexts:
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-0e6c9071c4222a6206aae39d43e650ceeadeddb8}}
+    environment:
+      CONFORMANCE_SERVICE_NAME: conformance-interop
+      CONFORMANCE_INSTANCE_ID: go
+      CONFORMANCE_HUBS: hub:7000
+      CONFORMANCE_CAPACITY: "16"
+
+  rust:
+    <<: *service
+    build:
+      context: ../
+      dockerfile: interop/images/rust/Dockerfile
+    environment:
+      CONFORMANCE_SERVICE_NAME: conformance-interop
+      CONFORMANCE_INSTANCE_ID: rust
+      CONFORMANCE_HUBS: hub:7000
+      CONFORMANCE_CAPACITY: "16"
+
+  kotlin:
+    <<: *service
+    build:
+      context: images/kotlin
+      # snodra-messaging's tag v0.5.1 carries examples/conformance-service (the Kotlin library
+      # publishes no conformance service artifact, so the harness builds it from the tag).
+      # KOTLIN_REF overrides the ref; KOTLIN_SRC names a local checkout instead.
+      additional_contexts:
+        kotlinsrc: ${KOTLIN_SRC:-https://github.com/snodra/snodra-messaging.git#${KOTLIN_REF:-v0.5.1}}
+    environment:
+      CONFORMANCE_SERVICE_NAME: conformance-interop
+      CONFORMANCE_INSTANCE_ID: kotlin
+      CONFORMANCE_HUBS: hub:7000
+      CONFORMANCE_CAPACITY: "16"

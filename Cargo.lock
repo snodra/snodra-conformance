@@ -3003,6 +3003,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "snodra-interop"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "clap",
+ "serde_json",
+ "snodra-conformance",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "snodra-messaging-rs"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
