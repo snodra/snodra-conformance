@@ -1,6 +1,6 @@
 # One real hub and one conformance service per language, all as service `conformance-interop`
 # (instance id = the language). Run through run.sh.
-name: snodra-interop
+# The project name comes from run.sh (-p), unique per run.
 
 x-service: &service
   depends_on:

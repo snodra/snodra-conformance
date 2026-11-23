@@ -27,11 +27,14 @@ struct Args {
     /// The languages that must be registered, comma-separated; each is its instance id
     #[arg(long, value_delimiter = ',')]
     languages: Vec<String>,
-    /// Languages whose library runs a send to a type it also handles in its own process, without
-    /// the hub (the Kotlin library does): their unary sends to the same type never leave the
-    /// process, so the driver records those pairs as local instead of as exchanges
+    /// Languages whose library answers a unary send of a type it also handles in its own
+    /// process without the hub (the Kotlin library does): those sends never leave the process,
+    /// so the driver reports them as not exercised instead of counting them as exchanges
     #[arg(long, value_delimiter = ',')]
     local_senders: Vec<String>,
+    /// Exit non-zero when any required exchange could not be exercised through the hub
+    #[arg(long)]
+    strict: bool,
 }
 
 /// The caller's token for the relay: a JWT-shaped, unsigned-in-effect token. Every library reads
@@ -137,6 +140,34 @@ async fn wait_for_instances(hub: &str, langs: &[String]) -> Res<()> {
     ))
 }
 
+/// Polls `conformance.View` (a query: the hub gives each call to some instance) until every
+/// language has reported a `subscriptionsServed` for which `ok` holds, or `limit` passes.
+async fn wait_for_subscriptions(
+    peer: &Peer,
+    langs: &[String],
+    ok: impl Fn(u64) -> bool,
+    limit: Duration,
+) -> Res<()> {
+    let deadline = tokio::time::Instant::now() + limit;
+    let mut seen: BTreeMap<String, u64> = BTreeMap::new();
+    while tokio::time::Instant::now() < deadline {
+        let view = call(peer, query("conformance.View", None, json!({}))).await?;
+        if let (Some(i), Some(n)) = (
+            view["instanceId"].as_str(),
+            view["subscriptionsServed"].as_u64(),
+        ) {
+            seen.insert(i.to_string(), n);
+        }
+        if langs.iter().all(|l| seen.get(l).is_some_and(|n| ok(*n))) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(format!(
+        "the instances' subscriptionsServed did not reach the expected state within {limit:?}: {seen:?}"
+    ))
+}
+
 /// 2. For each instance, a routing key whose keyed `conformance.Echo` answers that instance.
 async fn find_keys(peer: &Peer, langs: &[String]) -> Res<BTreeMap<String, String>> {
     let mut keys = BTreeMap::new();
@@ -201,7 +232,7 @@ async fn run(args: &Args) -> Res<()> {
     let hub = &args.hub;
     let trace = uuid::Uuid::new_v4().simple().to_string();
     let mut exchanges = 0usize;
-    let mut local: Vec<String> = Vec::new();
+    let mut unexercised: Vec<String> = Vec::new();
     let mut pass = |what: &str| {
         exchanges += 1;
         println!("ok   {what}");
@@ -229,12 +260,18 @@ async fn run(args: &Args) -> Res<()> {
     for (x, y) in pairs(langs) {
         let correlation = wire::new_id();
         let tp = traceparent(&trace);
+        let token = authorization();
+        let sent = json!({"from": x, "to": y, "nonce": wire::new_id()});
         let what = format!("{x} -> {y} (unary, keyed)");
         let outcome = send(
             &peer,
             &keys[&x],
-            vec![("correlationId", &correlation), ("traceparent", &tp)],
-            json!({"op": "unary", "target": "echo", "routingKey": keys[&y], "payload": {"from": x}}),
+            vec![
+                ("correlationId", &correlation),
+                ("traceparent", &tp),
+                ("authorization", &token),
+            ],
+            json!({"op": "unary", "target": "echo", "routingKey": keys[&y], "payload": sent}),
             &what,
         )
         .await?;
@@ -244,7 +281,7 @@ async fn run(args: &Args) -> Res<()> {
             println!(
                 "note {what}: served by {x} itself, not through the hub (local short-circuit)"
             );
-            local.push(format!("{x} -> {y}"));
+            unexercised.push(format!("{x} -> {y}"));
             continue;
         }
         expect(
@@ -261,6 +298,16 @@ async fn run(args: &Args) -> Res<()> {
             same_trace(&p["headers"], &trace),
             &format!("{what}: the trace {trace} reaches {y}"),
             &p["headers"],
+        )?;
+        expect(
+            header(&p["headers"], "authorization") == Some(&token),
+            &format!("{what}: the caller's authorization crosses from {x} to {y}"),
+            &p["headers"],
+        )?;
+        expect(
+            p["payload"] == sent,
+            &format!("{what}: the payload {sent} round-trips"),
+            &p["payload"],
         )?;
         pass(&what);
     }
@@ -305,15 +352,34 @@ async fn run(args: &Args) -> Res<()> {
         pass(&what);
 
         let what = format!("{x} unary echo-query");
-        send(
+        let sent = json!({"from": x, "nonce": wire::new_id()});
+        let outcome = send(
             &peer,
             &keys[x],
             vec![("traceparent", &tp)],
-            json!({"op": "unary", "target": "echo-query", "payload": {}}),
+            json!({"op": "unary", "target": "echo-query", "payload": sent}),
             &what,
         )
         .await?;
-        pass(&what);
+        let p = &outcome["payload"];
+        if args.local_senders.contains(x) {
+            // The hub would pick any instance; the sender's library answers a query it handles
+            // itself in-process, so this never reaches the hub.
+            println!("note {what}: answered in-process by {x}, not through the hub");
+            unexercised.push(format!("{x} unary echo-query"));
+        } else {
+            expect(
+                langs.iter().any(|l| p["instanceId"] == l.as_str()),
+                &format!("{what}: served by one of the languages"),
+                p,
+            )?;
+            expect(
+                p["payload"] == sent && same_trace(&p["headers"], &trace),
+                &format!("{what}: the payload {sent} round-trips in trace {trace}"),
+                p,
+            )?;
+            pass(&what);
+        }
     }
 
     // 5. A stream from every X (the hub chooses the serving instance; it is not observable).
@@ -341,6 +407,10 @@ async fn run(args: &Args) -> Res<()> {
     for x in langs {
         let what = format!("{x} subscribes, every language emits");
         let topic = format!("t-{x}");
+        // The previous subscription must be gone from every instance.
+        wait_for_subscriptions(&peer, langs, |n| n == 0, Duration::from_secs(20))
+            .await
+            .map_err(|e| format!("{what}: {e}"))?;
         let started = call(
             &peer,
             command(
@@ -355,9 +425,10 @@ async fn run(args: &Args) -> Res<()> {
             .as_str()
             .ok_or_else(|| format!("{what}: no opId in {started}"))?
             .to_string();
-        // The hub writes a subscription to every target before the initial request, so once
-        // the call is under way an emit reaches it; give the call a moment to get there.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
+        // The hub subscribes every instance: emit only once each one reports serving it.
+        wait_for_subscriptions(&peer, langs, |n| n >= 1, Duration::from_secs(20))
+            .await
+            .map_err(|e| format!("{what}: {e}"))?;
         for y in langs {
             call(
                 &peer,
@@ -418,6 +489,7 @@ async fn run(args: &Args) -> Res<()> {
         let tp = traceparent(&trace);
         let token = authorization();
         let what = format!("{x} relays to the driver's probe");
+        let sent = json!({"from": x, "nonce": wire::new_id()});
         call(
             &peer,
             Call {
@@ -429,7 +501,7 @@ async fn run(args: &Args) -> Res<()> {
                 ..command(
                     "conformance.Relay",
                     Some(&keys[x]),
-                    json!({"target": "probe", "payload": {"from": x}}),
+                    json!({"target": "probe", "payload": sent}),
                 )
             },
         )
@@ -445,6 +517,11 @@ async fn run(args: &Args) -> Res<()> {
             .ok_or_else(|| {
                 format!("{what}: the probe saw no request with correlation id {correlation}")
             })?;
+        expect(
+            wire::json(&seen.payload) == sent,
+            &format!("{what}: the payload {sent} reaches the probe unchanged"),
+            &wire::json(&seen.payload),
+        )?;
         let headers = json!(seen.headers);
         expect(
             header(&headers, "authorization") == Some(&token),
@@ -459,14 +536,37 @@ async fn run(args: &Args) -> Res<()> {
         pass(&what);
     }
 
-    if !local.is_empty() {
+    let reason = |l: &[String]| {
+        format!(
+            "{} {} their own types in-process, so these sends never reach the hub",
+            l.join(", "),
+            if l.len() == 1 { "answers" } else { "answer" }
+        )
+    };
+    if !unexercised.is_empty() {
         println!(
-            "note {} unary pair(s) did not go through the hub, the sender's library handles the type itself: {local:?}",
-            local.len()
+            "note {} required exchange(s) not exercised: {unexercised:?}",
+            unexercised.len()
         );
+        if args.strict {
+            return Err(format!(
+                "--strict: {} exchange(s) not exercised through the hub ({}): {unexercised:?}",
+                unexercised.len(),
+                reason(&args.local_senders)
+            ));
+        }
     }
+    let skipped = if unexercised.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ", {} not exercised ({}): {unexercised:?}",
+            unexercised.len(),
+            reason(&args.local_senders)
+        )
+    };
     println!(
-        "interop: {} languages, {} exchanges passed, trace {}",
+        "interop: {} languages, {} exchanges passed through the hub{skipped}, trace {}",
         langs.len(),
         exchanges,
         trace

@@ -4,6 +4,15 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      go_ref:
+        description: "interop: the snodra-messaging-go ref to build (empty: the pin in interop/compose.yaml)"
+        required: false
+        default: ""
+      languages:
+        description: "interop: the languages to run (empty: go,rust,kotlin)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -90,24 +99,23 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --target with-reference -t snodra-conformance:ci .
+      - run: docker build -t snodra-conformance:ci .
 
   # Services on the Kotlin, Rust and Go libraries talk to each other through a real hub
   # (interop/README.md). Manual only: it builds three images from source.
   interop:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.1"
-      - uses: arduino/setup-protoc@v3
-        with:
-          version: "29.3"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - name: every language sends to every other
         env:
           SNODRA_SERVER_VERSION: ${{ vars.SNODRA_SERVER_VERSION || '0.5.4' }}
+          GO_REF: ${{ inputs.go_ref }}
+          LANGUAGES: ${{ inputs.languages }}
         run: interop/run.sh

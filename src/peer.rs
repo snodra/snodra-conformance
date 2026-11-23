@@ -299,16 +299,23 @@ fn heartbeat() -> crate::proto::ClientMessage {
     }))
 }
 
-/// The hub's topology snapshot.
+/// The hub's topology snapshot (within 10 s: a hub that accepts the connection and never
+/// answers is an error, not a hang).
 pub async fn topology(address: &str) -> Result<TopologyResponse, String> {
-    let channel = Endpoint::from_shared(endpoint(address))
-        .map_err(|e| e.to_string())?
-        .connect()
+    let snapshot = async {
+        let channel = Endpoint::from_shared(endpoint(address))
+            .map_err(|e| e.to_string())?
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .map_err(|e| e.to_string())?;
+        HubClient::new(channel)
+            .topology(TopologyRequest {})
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| e.to_string())
+    };
+    tokio::time::timeout(Duration::from_secs(10), snapshot)
         .await
-        .map_err(|e| e.to_string())?;
-    HubClient::new(channel)
-        .topology(TopologyRequest {})
-        .await
-        .map(|r| r.into_inner())
-        .map_err(|e| e.to_string())
+        .map_err(|_| format!("the hub at {address} did not answer Topology within 10 s"))?
 }
