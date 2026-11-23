@@ -83,6 +83,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features -- --test-threads=1
 
+  # The release image of the runner (Dockerfile) must keep building: every workspace member's
+  # manifest is copied into it. Build only, nothing is pushed.
+  release-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target with-reference -t snodra-conformance:ci .
+
   # Services on the Kotlin, Rust and Go libraries talk to each other through a real hub
   # (interop/README.md). Manual only: it builds three images from source.
   interop:

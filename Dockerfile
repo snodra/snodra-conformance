@@ -20,6 +20,8 @@ COPY reference-service/Cargo.toml ./reference-service/
 COPY reference-service/src ./reference-service/src
 COPY violator/Cargo.toml ./violator/
 COPY violator/src ./violator/src
+COPY interop/driver/Cargo.toml ./interop/driver/
+COPY interop/driver/src ./interop/driver/src
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 # The build container has no known_hosts: the gitlab host key is accepted on first use.
 ENV GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"
