@@ -67,7 +67,7 @@ the runner stops every instance that way, and its pre-flight ends the run when t
 | `CONFORMANCE_OAUTH2_TOKEN_URL`, `CONFORMANCE_OAUTH2_CLIENT_ID`, `CONFORMANCE_OAUTH2_CLIENT_SECRET` | the service's JWT: client credentials at this token endpoint (`POST`, form `grant_type=client_credentials`, the answer's `access_token` and `expires_in`) |
 | `CONFORMANCE_TLS_CA`, `CONFORMANCE_TLS_SERVER_NAME` | TLS to the hubs: a PEM file of the CA to trust and the name to verify |
 | `CONFORMANCE_TLS_CLIENT_CERT`, `CONFORMANCE_TLS_CLIENT_KEY` | mutual TLS: the client certificate (PEM, `snodra://service/<name>`) and its key; the runner replaces the files to renew them |
-| `CONFORMANCE_JWKS_URL`, `CONFORMANCE_ISSUER` | callers' tokens (the `authorization` header) are validated against this JWKS (RS256) and issuer; only the checks that call `conformance.Guarded` set them (`L1-IDENTITY`, `L1-PROPAGATION`) |
+| `CONFORMANCE_JWKS_URL`, `CONFORMANCE_ISSUER` | callers' tokens (the `authorization` header) are validated against this JWKS (RS256) and issuer; only `L1-IDENTITY` (which calls `conformance.Guarded`) and `L1-PROPAGATION` (which relays a caller's token) set them |
 
 The service registers every type of [the next section](#the-services-types) at start, with one exception:
 `conformance.Guarded` is registered only when `CONFORMANCE_JWKS_URL` is set. A handler that requires an authenticated
