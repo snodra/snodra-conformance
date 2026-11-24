@@ -1,4 +1,4 @@
-//! The reference conformance service: the contract of `protocol/conformance.md` on
+//! The reference conformance service: the conformance contract (`docs/contract.md`) on
 //! snodra-messaging-rs. The runner (`snodra-conformance`) starts it once per check with the
 //! `CONFORMANCE_*` environment, drives it through a hub and reads what it reports.
 //!
@@ -33,7 +33,7 @@ macro_rules! json_message {
     };
 }
 
-// The types the service handles (conformance.md, "Message types").
+// The types the service handles (docs/contract.md, "The service's types").
 json_message!(Echo, "conformance.Echo");
 json_message!(EchoQuery, "conformance.EchoQuery");
 json_message!(Done, "conformance.Done");
@@ -150,7 +150,7 @@ fn mutation(name: &str) -> bool {
         == Some(name)
 }
 
-/// The `CONFORMANCE_*` environment the runner sets (conformance.md, "Starting the service").
+/// The `CONFORMANCE_*` environment the runner sets (docs/contract.md, "Starting the service").
 struct Env {
     service: String,
     instance: String,
@@ -236,7 +236,7 @@ impl Env {
                 client_key_file: self.tls_client.as_ref().map(|(_, k)| k.clone()),
             });
         }
-        // The library's retry policy for every send (conformance.md: CONFORMANCE_RETRY_*).
+        // The library's retry policy for every send (docs/contract.md: CONFORMANCE_RETRY_*).
         if let Some((attempts, backoff)) = self.retry {
             c.hub_retry = Some(RetryPolicy {
                 max_attempts: attempts,
@@ -357,13 +357,6 @@ async fn main() {
             })
         })
         .command::<Strict, _, _>(|m, _| async move { Ok(json!({ "count": m.count })) })
-        .command::<Guarded, _, _>(|m, ctx| async move {
-            Ok(json!({ "count": m.count, "user": ctx.user_id() }))
-        })
-        // An authenticated caller, and not the subject the contract names as refused.
-        .requires::<Guarded>(Guard::custom(|identity, _| {
-            mutation("no-guard") || identity.user_id.as_deref() != Some("conformance-refused")
-        }))
         .command::<Relay, _, _>({
             let s = s.clone();
             move |m, _| {
@@ -477,6 +470,21 @@ async fn main() {
                 async move { Ok(s.view()) }
             }
         });
+    // `conformance.Guarded` only with the runner's JWKS: a guard needs one to verify callers, and
+    // the library refuses to start a guarded handler without it. Without a JWKS the type is not
+    // registered, so a request of it is NO_HANDLER.
+    let builder = if env.jwks_url.is_some() {
+        builder
+            .command::<Guarded, _, _>(|m, ctx| async move {
+                Ok(json!({ "count": m.count, "user": ctx.user_id() }))
+            })
+            // An authenticated caller, and not the subject the contract names as refused.
+            .requires::<Guarded>(Guard::custom(|identity, _| {
+                mutation("no-guard") || identity.user_id.as_deref() != Some("conformance-refused")
+            }))
+    } else {
+        builder
+    };
     let app = builder.start().await.expect("the service did not start");
     let _ = shared.app.set(app);
     shutdown_signal().await;
@@ -760,7 +768,7 @@ fn failed(e: &MessagingError) -> Value {
         MessagingError::NoHandler(_) => ("code", Some("NO_HANDLER")),
         MessagingError::Timeout(_) => ("code", Some("TIMEOUT")),
         MessagingError::HandlerDisconnected(_) => ("code", Some("HANDLER_DISCONNECTED")),
-        MessagingError::HandlerBusy(_) => ("code", Some("RESOURCE_EXHAUSTED")),
+        MessagingError::HandlerBusy { .. } => ("code", Some("RESOURCE_EXHAUSTED")),
         MessagingError::RemoteHandler { .. } => ("code", Some("HANDLER_ERROR")),
         MessagingError::Unauthenticated(_) => ("code", Some("UNAUTHENTICATED")),
         MessagingError::AccessDenied(_) => ("code", Some("PERMISSION_DENIED")),

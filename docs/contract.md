@@ -66,11 +66,17 @@ the runner stops every instance that way, and its pre-flight ends the run when t
 | `CONFORMANCE_OAUTH2_TOKEN_URL`, `CONFORMANCE_OAUTH2_CLIENT_ID`, `CONFORMANCE_OAUTH2_CLIENT_SECRET` | the service's JWT: client credentials at this token endpoint (`POST`, form `grant_type=client_credentials`, the answer's `access_token` and `expires_in`) |
 | `CONFORMANCE_TLS_CA`, `CONFORMANCE_TLS_SERVER_NAME` | TLS to the hubs: a PEM file of the CA to trust and the name to verify |
 | `CONFORMANCE_TLS_CLIENT_CERT`, `CONFORMANCE_TLS_CLIENT_KEY` | mutual TLS: the client certificate (PEM, `snodra://service/<name>`) and its key; the runner replaces the files to renew them |
-| `CONFORMANCE_JWKS_URL`, `CONFORMANCE_ISSUER` | callers' tokens (the `authorization` header) are validated against this JWKS (RS256) and issuer |
+| `CONFORMANCE_JWKS_URL`, `CONFORMANCE_ISSUER` | callers' tokens (the `authorization` header) are validated against this JWKS (RS256) and issuer; only the checks that call `conformance.Guarded` set them (`L1-IDENTITY`, `L1-PROPAGATION`) |
 
-The service registers every type of [the next section](#the-services-types) at start, has no event handler, no event
-store and no message store, writes its logs to standard output or standard error (the runner keeps them per instance),
-and stops on SIGTERM within 5 s. It must register within 30 s of its start (`--startup-timeout` raises it).
+The service registers every type of [the next section](#the-services-types) at start, with one exception:
+`conformance.Guarded` is registered only when `CONFORMANCE_JWKS_URL` is set. A handler that requires an authenticated
+caller needs a JWKS to verify the caller's token, and a library refuses to start one without it
+([messages.md, Forwarded identity](https://snodra.damoreira.com/library-authors/messages/#forwarded-identity)). Without
+a JWKS the service serves no `conformance.Guarded`, so a request of it gets `NO_HANDLER`.
+
+The service has no event handler, no event store and no message store, writes its logs to standard output or standard
+error (the runner keeps them per instance), and stops on SIGTERM within 5 s. It must register within 30 s of its start
+(`--startup-timeout` raises it).
 
 ## The service's types
 
@@ -83,7 +89,7 @@ and stops on SIGTERM within 5 s. It must register within 30 s of its start (`--s
 | `conformance.SleepQuery` | query, unary | the same, as a query: the target the runner cancels as a scatter-gather target (snodra-server cancels only queries) |
 | `conformance.Fail` | command, unary | fails as a handler raising an application error: `HANDLER_ERROR`, the message containing `message`, the details the JSON text of `details` |
 | `conformance.Strict` | command, unary | its payload is `{count: integer}`; a payload that does not decode to it is the library's `INVALID_REQUEST` |
-| `conformance.Guarded` | command, unary | requires an authenticated caller; refuses the subject `conformance-refused` (`PERMISSION_DENIED`); payload as `conformance.Strict`; answers `{count, user}` |
+| `conformance.Guarded` | command, unary | only with `CONFORMANCE_JWKS_URL`; requires an authenticated caller; refuses the subject `conformance-refused` (`PERMISSION_DENIED`); payload as `conformance.Strict`; answers `{count, user}` |
 | `conformance.Relay` | command, unary | inside its handler sends `payload` as a command to `conformance.runner.Probe` (`target` `probe`) or `conformance.runner.Missing` (`missing`), with default options, and fails as an application does when that call fails: it rethrows the library's error, never maps it itself |
 | `conformance.SharedQuery` | query, unary, **shared** | registered in `Register.shared_query_types`; answers `{service, instanceId}` |
 | `conformance.Stream` | query, streaming | `count` items `{n}`, n = 1, 2, ..., each after `delayMs` |

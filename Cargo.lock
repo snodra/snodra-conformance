@@ -3016,9 +3016,9 @@ dependencies = [
 
 [[package]]
 name = "snodra-messaging-rs"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23dadce862197f8146498b18c806184eac78d1579fba341d5a41e693ce032a5"
+checksum = "77d1df31cbacfd12f216744ebe8423968f104133df0e58826b92832d982f2c9f"
 dependencies = [
  "base64 0.23.1",
  "chrono",

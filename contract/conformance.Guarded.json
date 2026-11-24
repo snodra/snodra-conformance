@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "conformance.Guarded.json",
   "title": "conformance.Guarded",
-  "description": "Requires an authenticated caller (the authorization header, validated against CONFORMANCE_JWKS_URL and CONFORMANCE_ISSUER, before decoding); refuses sub conformance-refused with PERMISSION_DENIED.",
+  "description": "Registered only when CONFORMANCE_JWKS_URL is set (a guard needs a JWKS). Requires an authenticated caller (the authorization header, validated against CONFORMANCE_JWKS_URL and CONFORMANCE_ISSUER, before decoding); refuses sub conformance-refused with PERMISSION_DENIED.",
   "x-snodra": {
     "conformanceVersion": 1,
     "kind": "command",
