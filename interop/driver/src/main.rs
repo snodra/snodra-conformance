@@ -28,8 +28,9 @@ struct Args {
     #[arg(long, value_delimiter = ',')]
     languages: Vec<String>,
     /// Languages whose service answers a unary send of a type it also handles in its own
-    /// process without the hub (the Kotlin service does): those sends never leave the process,
-    /// so the driver reports them as not exercised instead of counting them as exchanges
+    /// process without the hub (a service that keeps its library's default and cannot be told
+    /// to route through the hub): those sends never leave the process, so the driver reports
+    /// them as not exercised instead of counting them as exchanges (none of the official services)
     #[arg(long, value_delimiter = ',')]
     local_senders: Vec<String>,
     /// Exit non-zero when any required exchange could not be exercised through the hub

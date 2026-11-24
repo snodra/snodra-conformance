@@ -9,10 +9,10 @@
 # runs on one host do not stop each other, but two runs need two SNODRA_HUB_PORT values),
 # INTEROP_STRICT=1 (exit non-zero when a required exchange could not go through the hub),
 # LOCAL_SENDERS (languages whose service answers a unary send to a type it
-# handles itself without the hub; default kotlin), GO_REF / GO_SRC and KOTLIN_REF / KOTLIN_SRC (see compose.yaml).
+# handles itself without the hub, comma-separated; default none: every official service here sends
+# through the hub), GO_REF / GO_SRC and KOTLIN_REF / KOTLIN_SRC (see compose.yaml).
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
-# were not exercised (languages whose service answers its own types in-process, kotlin by default);
-# with INTEROP_STRICT=1 any such exchange is a failure.
+# were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -24,6 +24,8 @@ project="${INTEROP_PROJECT:-snodra-interop-$$}"
 compose() { docker compose -p "$project" "$@"; }
 strict=()
 if [[ "${INTEROP_STRICT:-}" == "1" ]]; then strict=(--strict); fi
+local_senders=()
+if [[ -n "${LOCAL_SENDERS:-}" ]]; then local_senders=(--local-senders "$LOCAL_SENDERS"); fi
 
 cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -34,7 +36,7 @@ trap cleanup EXIT
 compose up -d --build --wait hub $services
 
 status=0
-cargo run -q -p snodra-interop -- --hub "127.0.0.1:$port" --languages "$languages" --local-senders "${LOCAL_SENDERS-kotlin}" ${strict[@]+"${strict[@]}"} || status=$?
+cargo run -q -p snodra-interop -- --hub "127.0.0.1:$port" --languages "$languages" ${local_senders[@]+"${local_senders[@]}"} ${strict[@]+"${strict[@]}"} || status=$?
 if ((status != 0)); then
   compose logs --no-color --tail 60 $services >&2 || true
 fi

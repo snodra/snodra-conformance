@@ -15,17 +15,16 @@ It needs Docker with compose (it builds three images and starts the hub image
 `snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.6.0}`) and a Rust toolchain for the driver. It prints one
 line per exchange and stops everything it started.
 
-**Read the summary line, not only the exit code.** Every exchange that runs must pass, but some required
-exchanges cannot go through the hub with the Kotlin conformance service (see "Known limits"). They are **not
-exercised**, and the last line says so:
+Every exchange runs through the hub and must pass. With the three official services the last line reads:
 
 ```text
-interop: 3 languages, 17 exchanges passed through the hub, 3 not exercised (kotlin answers its own types
-in-process, so these sends never reach the hub): ["kotlin -> go", "kotlin -> rust", "kotlin unary echo-query"], trace <id>
+interop: 3 languages, 21 exchanges passed through the hub, trace <id>
 ```
 
-Exit 0 is the default for that known case. `INTEROP_STRICT=1 interop/run.sh` (the driver's `--strict`) turns any
-not-exercised exchange into a failure with a non-zero exit. Two runs on one host need different
+**Read the summary line, not only the exit code**, when a service answers its own types in-process (see "Sends
+to the sender's own types"): its required exchanges are then **not exercised**, the line names them, and the
+exit code is still 0. `INTEROP_STRICT=1 interop/run.sh` (the driver's `--strict`) turns any not-exercised
+exchange into a failure with a non-zero exit. Two runs on one host need different
 `SNODRA_HUB_PORT` values (the compose project name is unique per run, `INTEROP_PROJECT` overrides it).
 
 ## What runs
@@ -70,17 +69,15 @@ not-exercised exchange into a failure with a non-zero exit. Two runs on one host
 
 ## Known limits
 
-- **Not exercised: sends the sender answers in-process.** Every official library answers a command, and a
-  point query of a type that is not shared, in-process when its own instance handles the type: the hub is
-  not used and the routing key is ignored. Every service here handles `Echo` and `EchoQuery`, so such a send
-  reaches another language only when the service turns on its library's "always route through the hub"
-  setting. The Rust and Go services do; the Kotlin service keeps the default. Kotlin sending a keyed `Echo`
-  to Go or Rust, and a unary `EchoQuery`, therefore never leaves the process: these exchanges are required
-  but **cannot be exercised through the hub**, and are reported as not exercised, never as passed. `run.sh`
-  passes `--local-senders ${LOCAL_SENDERS:-kotlin}` to name the languages that do this; for any other
-  language the full assertions apply, and a listed language whose send does reach the hub is asserted in
-  full. Kotlin as a sender through the hub is covered by the scatter, stream, subscription and relay
-  exchanges (4 to 7). Use `INTEROP_STRICT=1` to fail on them.
+- **Sends to the sender's own types.** Every official library answers a command, and a point query of a
+  type that is not shared, in-process when its own instance handles the type: the hub is not used and the
+  routing key is ignored. Every service here handles `Echo` and `EchoQuery`, so such a send reaches another
+  language only when the service turns on its library's "always route through the hub" setting. The Rust
+  and Go services turn it on themselves; the Kotlin service keeps the default, and `compose.yaml` turns it on
+  through its environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that cannot be told
+  to route through the hub is named in `LOCAL_SENDERS` (comma-separated, empty by default): its keyed `Echo`
+  to another language and its unary `EchoQuery` are then reported as not exercised, never as passed, and
+  `INTEROP_STRICT=1` fails on them.
 - **Streaming.** The serving instance of a stream is chosen by the hub (routing keys are ignored for
   queries); the harness checks the items, not who produced them.
 - **Outcome.** `conformance.Outcome` is a query, so the hub may route it to an instance that does not own the

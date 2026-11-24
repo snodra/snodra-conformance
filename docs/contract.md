@@ -183,9 +183,11 @@ go through the hub.
 
 No level-1 check sends to the service's own types: the checks send only to the runner's types, which the service never
 handles, so the setting changes no verdict. The interoperability harness (`interop/`) does send to them, to make one
-language call another through the hub. A conformance service should therefore turn the setting on. The reference
-service and the Go conformance service do; a service that keeps the default answers those sends itself, and the
-harness reports them as not exercised (its `LOCAL_SENDERS`).
+language call another through the hub. A conformance service should therefore turn the setting on, or let it be
+turned on through its environment. The reference service and the Go conformance service turn it on themselves; the
+Kotlin conformance service keeps the library's default, and the harness turns it on through the service's
+environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that cannot route these sends through the
+hub answers them itself, and the harness reports them as not exercised (its `LOCAL_SENDERS`).
 
 ## How each check is proved
 

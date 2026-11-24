@@ -55,3 +55,7 @@ services:
       CONFORMANCE_INSTANCE_ID: kotlin
       CONFORMANCE_HUBS: hub:7000
       CONFORMANCE_CAPACITY: "16"
+      # The Kotlin conformance service keeps the library's default and answers a send to its own
+      # types in-process; this turns on snodra.messaging.hub.always-route-through-hub, so its sends
+      # to Echo and EchoQuery reach the other languages through the hub as the others' do.
+      SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB: "true"
