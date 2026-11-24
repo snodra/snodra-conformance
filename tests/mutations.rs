@@ -168,13 +168,21 @@ const VIOLATIONS: &[Mutation] = &[
         &[],
     ),
     // Without permits back the hub forwards nothing beyond the capacity: L1-REQUEST-ID's
-    // sends and their controls stall too.
+    // sends and their controls stall too, and so do L1-HANDLER-ERRORS's 20 requests.
     (
         "no-permits",
         "L1-PERMITS",
         "did not come back",
         REQUESTS,
-        &["L1-REQUEST-ID"],
+        &["L1-REQUEST-ID", "L1-HANDLER-ERRORS"],
+    ),
+    // One cell of protocol.md's table of requests in a mode the handler does not serve.
+    (
+        "wrong-mode-code",
+        "L1-HANDLER-ERRORS",
+        "a stream of a command type",
+        REQUESTS,
+        &[],
     ),
     (
         "unbatched-permits",

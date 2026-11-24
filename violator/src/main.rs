@@ -7,7 +7,7 @@
 //! no-backoff, signed-rendezvous, sticky-unkeyed, no-permits, unbatched-permits, seq-from-zero,
 //! no-signature-check, no-tls-verify, mtls-no-reload, renew-late, keep-subscriptions,
 //! no-subscription-limit, retry-after-timeout, case-sensitive-headers, no-subscription-types,
-//! drop-silent-early, token-after-lookup.
+//! drop-silent-early, token-after-lookup, wrong-mode-code.
 //!
 //! Without a violation it is the baseline the mutation test compares against: every check of the
 //! target's group keeps the verdict it has without the violation.
@@ -356,8 +356,62 @@ async fn run_conn(st: Arc<State>, i: usize) {
     }
 }
 
+/// The handlers it serves, by kind (for the answers to a request in another mode).
+const COMMANDS: [&str; 8] = [
+    "Echo", "Sleep", "Emit", "Guarded", "Send", "Fail", "Strict", "Relay",
+];
+const UNARY_QUERIES: [&str; 4] = ["EchoQuery", "SleepQuery", "View", "Outcome"];
+const STREAMING_QUERIES: [&str; 1] = ["Stream"];
+const SUBSCRIPTION_QUERIES: [&str; 1] = ["Watch"];
+
+/// The answer protocol.md gives a request in a mode its handler does not serve, or `None` when
+/// the handler serves it. With `wrong-mode-code`, a stream of a command type is
+/// INVALID_REQUEST instead of NO_HANDLER.
+fn wrong_mode(r: &Request) -> Option<(i32, String)> {
+    const NO_HANDLER: i32 = 1;
+    const INVALID_REQUEST: i32 = 6;
+    let name = r.r#type.strip_prefix("conformance.").unwrap_or("");
+    let is = |set: &[&str]| set.contains(&name);
+    let wrong = |what: &str| format!("{} {what}", r.r#type);
+    if r.mode == RequestMode::Subscription as i32 {
+        return (!is(&SUBSCRIPTION_QUERIES)).then(|| {
+            (
+                INVALID_REQUEST,
+                format!("no subscription handler for {} on this instance", r.r#type),
+            )
+        });
+    }
+    if r.mode == RequestMode::Streaming as i32 {
+        return if is(&STREAMING_QUERIES) {
+            None
+        } else if is(&UNARY_QUERIES) || is(&SUBSCRIPTION_QUERIES) {
+            Some((INVALID_REQUEST, wrong("is not a streaming query")))
+        } else if is(&COMMANDS) && violation("wrong-mode-code") {
+            Some((INVALID_REQUEST, wrong("is a command")))
+        } else {
+            Some((NO_HANDLER, format!("no handler for type {}", r.r#type)))
+        };
+    }
+    if r.kind == RequestKind::Command as i32 {
+        return (!is(&COMMANDS)).then(|| (NO_HANDLER, format!("no handler for type {}", r.r#type)));
+    }
+    if r.kind != RequestKind::Query as i32 {
+        return Some((
+            INVALID_REQUEST,
+            format!("unsupported request kind {}", r.kind),
+        ));
+    }
+    if is(&UNARY_QUERIES) || (is(&SUBSCRIPTION_QUERIES) && r.id.ends_with("#0")) {
+        None
+    } else if is(&STREAMING_QUERIES) || is(&SUBSCRIPTION_QUERIES) {
+        Some((INVALID_REQUEST, wrong("is not a unary query")))
+    } else {
+        Some((NO_HANDLER, format!("no handler for type {}", r.r#type)))
+    }
+}
+
 fn all_types() -> (Vec<String>, Vec<String>) {
-    let commands = ["Echo", "Sleep", "Emit", "Guarded", "Send"];
+    let commands = COMMANDS;
     let queries = [
         "EchoQuery",
         "SleepQuery",
@@ -633,12 +687,14 @@ async fn handle(st: Arc<State>, i: usize, generation: u64, r: Request) {
     let refused = if violation("token-after-lookup") {
         None
     } else {
-        caller(&st, &r).await.err()
+        caller(&st, &r).await.err().map(|why| (5, why))
     };
-    let msg = if let Some(why) = refused {
+    // Then the handler the type has here and the request's mode.
+    let refused = refused.or_else(|| wrong_mode(&r));
+    let msg = if let Some((code, why)) = refused {
         let error = Error {
             request_id: id.clone(),
-            code: 5,
+            code,
             message: why,
             details: vec![],
         };
@@ -874,6 +930,23 @@ async fn unary(st: &Arc<State>, r: &Request, p: &Value) -> client_message::Messa
         }
         "Guarded" => guarded(st, r, p).await,
         "Relay" => relay(st, r, p).await,
+        "Fail" => client_message::Message::Reply(Reply {
+            request_id: id.into(),
+            result: Some(reply::Result::Error(Error {
+                request_id: id.into(),
+                code: 4,
+                message: p["message"].as_str().unwrap_or("failed").into(),
+                details: if p["details"].is_null() {
+                    vec![]
+                } else {
+                    p["details"].to_string().into_bytes()
+                },
+            })),
+        }),
+        "Strict" => match p["count"].as_i64() {
+            Some(count) => reply_ok(id, &json!({ "count": count })),
+            None => reply_err(id, 6, "payload does not decode"),
+        },
         "Send" if p["async"] == true => {
             let op = wire::new_id();
             st.ops.lock().unwrap().insert(op.clone(), None);
