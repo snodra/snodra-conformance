@@ -1,5 +1,5 @@
 //! The service under test: the library's conformance service, started by the runner with the
-//! `CONFORMANCE_*` environment (`protocol/conformance.md`, "Starting the service").
+//! `CONFORMANCE_*` environment (`docs/contract.md`, "Starting the service").
 
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};

@@ -101,10 +101,10 @@ error (the runner keeps them per instance), and stops on SIGTERM within 5 s. It 
 | `conformance.View` | query, unary | `{service, instanceId, hubIds, lastRejection, subscriptionsServed, retry}`: the hub ids the instance counts as registered (acknowledged), the latest `Register` refusal the library exposes, the subscriptions it serves, whether a retry policy applies to its sends (required: an absent `retry` fails `L1-RETRY` as a contract violation) |
 
 `conformance.View.lastRejection` may come from any means the library offers to expose a refusal: an API, or its log.
-Both official libraries expose it through an API (Kotlin `com.damoreira.snodra.messaging.hub.HubConnections.latestRejection`,
-which the Kotlin conformance service reads; Rust `snodra_messaging::SnodraMessaging::latest_rejection()`, which the Rust
-reference service in the snodra-conformance repository, `reference-service/`, reads). A library that exposes refusals
-nowhere fails `L1-REJECTION`.
+The official libraries expose it through an API: Kotlin `com.damoreira.snodra.messaging.hub.HubConnections.latestRejection`
+(read by the Kotlin conformance service), Rust `snodra_messaging::SnodraMessaging::latest_rejection()` (read by the
+reference service of this repository, `reference-service/`) and Go `snodra.App.Rejection()` (read by the Go conformance
+service). A library that exposes refusals nowhere fails `L1-REJECTION`.
 
 Everything else is the library's own behaviour: the conformance service writes these handlers the way an application
 would, with the library's API, and never works around the library (no hand-written frames, no error mapping of its

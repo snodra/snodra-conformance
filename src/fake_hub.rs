@@ -2,8 +2,8 @@
 //! does what a check scripts. It behaves like snodra-server wherever a check relies on it (the
 //! handshake and its refusals, the echo after the ack, permits and queueing, later and empty
 //! `Register`s, `NO_HANDLER` for a type nobody serves); the differences that remain are listed in
-//! the Snodra docs (`docs/libraries/conformance.md`, "How the runner's hub differs from
-//! snodra-server"), and `tests/consistency.rs` runs one script of frames against both.
+//! the conformance page of the Snodra docs ("How the runner's hub differs from snodra-server"),
+//! and `tests/consistency.rs` runs one script of frames against both.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;

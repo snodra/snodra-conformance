@@ -1,5 +1,5 @@
 //! `snodra-conformance`: runs the conformance checks of a feature level against a library's
-//! conformance service and prints the report (the conformance contract, `protocol/conformance.md`).
+//! conformance service and prints the report (the conformance contract, `docs/contract.md`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;

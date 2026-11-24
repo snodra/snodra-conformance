@@ -1,8 +1,8 @@
 //! One stream: registration, handshake, refusals, heartbeats, reconnect, status.
 //!
-//! Every time bound below names the rule of the Snodra protocol docs
-//! (`docs/libraries/protocol.md`) it comes from, with the tolerance added for scheduling (a cold
-//! or busy service must pass).
+//! Every time bound below names the rule of the hub protocol page
+//! (<https://snodra.damoreira.com/library-authors/protocol/>) it comes from, with the tolerance
+//! added for scheduling (a cold or busy service must pass).
 
 use std::time::{Duration, Instant};
 

@@ -1,5 +1,5 @@
 //! `snodra-conformance`: proves a client library's feature level (the conformance contract,
-//! `protocol/conformance.md`; the Snodra docs: <https://snodra.damoreira.com/>).
+//! `docs/contract.md`; the Snodra docs: <https://snodra.damoreira.com/>).
 //!
 //! The runner starts the library's conformance service once per check (`--service-cmd`, with the
 //! `CONFORMANCE_*` environment) and connects it to a real hub (`--hub`) or to fake hubs it runs
@@ -19,7 +19,7 @@ pub mod report;
 pub mod sut;
 pub mod wire;
 
-/// The version of the conformance contract the runner checks (`protocol/conformance.md`).
+/// The version of the conformance contract the runner checks (`docs/contract.md`).
 pub const CONFORMANCE_VERSION: u32 = 1;
 /// The runner's own version.
 pub const RUNNER_VERSION: &str = env!("CARGO_PKG_VERSION");

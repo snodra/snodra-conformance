@@ -4,7 +4,8 @@
 //! queueing with a grant raising the cap, a later Register's ack, Cancel for a stream and none for
 //! a command, a half-close) runs against a fake hub and against `snodra-server:dev` (Docker), and
 //! both must yield the same observable sequence. What the fake hub deliberately does differently
-//! is listed in the Snodra docs (`docs/libraries/conformance.md`).
+//! is listed in the conformance page of the Snodra docs
+//! (<https://snodra.damoreira.com/library-authors/conformance/>).
 
 mod support;
 
