@@ -1,90 +1,216 @@
 name: release
 
+# CI calls this after it pushes a release tag (ci.yml, job `release`): a tag pushed with
+# GITHUB_TOKEN starts no workflow by itself. Run it by hand only to publish an existing tag again,
+# for example to finish a release that failed halfway; nobody pushes tags.
+#
+# check (read-only): the tag, its commit, and the version its tree carries.
+# binaries (read-only, binaries.yml): one archive per target, built from that commit, kept as run
+#   artifacts.
+# image (read-only, the Docker Hub login): once every target built, builds the image from that
+#   commit, pushes it and checks the version it reports.
+# github-release (write, no Docker Hub login): the GitHub release, last, with the archives.
+# No job that can write to the repository builds anything.
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release, for example v0.3.0
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to release again, for example v0.3.0
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
+# The input reaches the shells only through this variable, never written into a script, and is
+# printed only once it is checked.
 env:
   IMAGE: snodra/snodra-conformance
+  TAG: ${{ inputs.tag }}
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  # The uploads attach to an existing release, so it is created first.
-  prepare:
+  # Every other job needs this one. The tag must be a release version that already exists and its
+  # tree must carry that version, so a mistyped tag publishes nothing and creates no tag, and an
+  # old tag cannot publish an image or binaries under another version.
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      latest: ${{ steps.tag.outputs.latest }}
+      commit: ${{ steps.tag.outputs.commit }}
     steps:
-      - name: create the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.ref_name }}
+      - name: the tag is vN.N.N
         run: |
-          NOTES="Container image: \`$IMAGE:${VERSION#v}\`
-          Binaries: one archive per target below."
-          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --title "${GITHUB_REPOSITORY#*/} $VERSION" --notes "$NOTES"
-          else
-            gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --title "${GITHUB_REPOSITORY#*/} $VERSION" --generate-notes --notes "$NOTES"
+          if ! [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::the tag input is not a release tag of the form vN.N.N"
+            exit 1
+          fi
+      # The current scripts and every tag (the tag's own tree may predate scripts/).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Later jobs check out this commit, not the tag name: what is published is what was checked,
+      # even if the tag moved in between.
+      - name: the tag exists, and whether it is the highest
+        id: tag
+        run: |
+          if ! commit=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}"); then
+            echo "::error::the tag $TAG does not exist"
+            exit 1
+          fi
+          highest=$(git tag --list 'v*' | scripts/last-tag.sh)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "latest=$([ "$TAG" = "$highest" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "$TAG at $commit; highest release tag: $highest"
+      # The manifest gives the binary its version (--version) and the lock must agree (--locked).
+      - name: the tag's tree carries its version
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          version=${TAG#v}
+          # Through files, not pipes: awk stops early, and pipefail would count git's SIGPIPE.
+          git show "$COMMIT:Cargo.toml" > "$RUNNER_TEMP/Cargo.toml"
+          git show "$COMMIT:Cargo.lock" > "$RUNNER_TEMP/Cargo.lock"
+          manifest=$(awk '/^\[/ { p = ($0 == "[package]") } p && /^version = / { print; exit }' "$RUNNER_TEMP/Cargo.toml")
+          lock=$(awk 'prev == "name = \"snodra-conformance\"" { print; exit } { prev = $0 }' "$RUNNER_TEMP/Cargo.lock")
+          echo "Cargo.toml: $manifest; Cargo.lock: $lock"
+          if [ "$manifest" != "version = \"$version\"" ] || [ "$lock" != "version = \"$version\"" ]; then
+            echo "::error::the tree of $TAG does not carry the version $version"
+            exit 1
           fi
 
+  # One archive per target (binaries.yml holds the list), built from the tag's commit, checked
+  # where the runner can execute it, and kept for github-release. Nothing there can write.
+  binaries:
+    needs: check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/binaries.yml
+    with:
+      commit: ${{ needs.check.outputs.commit }}
+      version: ${{ needs.check.outputs.version }}
+      keep: true
+
+  # This job must build while it holds the Docker Hub login: the image is built and pushed in one
+  # step. It has no write access to the repository. It waits for the binaries, so a target that
+  # fails pushes no image.
   image:
-    needs: prepare
+    needs: [check, binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: version
-        id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.check.outputs.commit }}
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+
+      # `latest` moves only to the highest version: publishing an older tag again leaves it.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE }}:${{ steps.v.outputs.version }}
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ needs.check.outputs.version }}
+            ${{ needs.check.outputs.latest == 'true' && format('{0}:latest', env.IMAGE) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # The same binary, without Docker: static musl builds for Linux, native builds for macOS and
-  # Windows. protoc comes from the build dependency, so no runner needs a system package.
-  binaries:
-    needs: prepare
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-    runs-on: ${{ matrix.os }}
+      # The image as Docker Hub serves it, on both platforms (arm64 through QEMU). A re-run or a run
+      # by hand overwrites the tags, so this checks what is there now.
+      - name: the pushed image reports the version
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          docker logout docker.io
+          for platform in linux/amd64 linux/arm64; do
+            got=$(docker run --rm --pull always --platform "$platform" "$IMAGE:$VERSION" --version)
+            echo "$platform: $got"
+            if [ "$got" != "snodra-conformance $VERSION" ]; then
+              echo "::error::$IMAGE:$VERSION on $platform reports '$got', not snodra-conformance $VERSION"
+              exit 1
+            fi
+          done
+
+  # Last, once the image is pushed and every archive is built, so a release that failed halfway is
+  # never shown as done (or as the latest). It is a draft until every archive is attached. It holds
+  # the write token, builds nothing, checks nothing out and has no Docker Hub login.
+  # Safe to repeat: an existing release is edited and the archives are replaced.
+  github-release:
+    needs: [check, binaries, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/upload-rust-binary-action@v1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          bin: snodra-conformance
-          target: ${{ matrix.target }}
-          archive: snodra-conformance-$tag-$target
-          include: LICENSE,README.md
-          token: ${{ secrets.GITHUB_TOKEN }}
+          pattern: binary-*
+          path: archives
+          merge-multiple: true
+      - name: create the release, attach the archives, then make it public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ needs.check.outputs.latest }}
+          VERSION: ${{ needs.check.outputs.version }}
+          TARGETS: ${{ needs.binaries.outputs.targets }}
+        run: |
+          ls -l archives
+          # One archive per target and nothing else, or no release (an artifact can expire before
+          # a late re-run).
+          [ -n "$TARGETS" ] || { echo "::error::no target list"; exit 1; }
+          count=0
+          for target in $TARGETS; do
+            [[ $target =~ ^[a-z0-9_-]+$ ]] || { echo "::error::not a target name"; exit 1; }
+            n=$(find archives -maxdepth 1 -type f -name "snodra-conformance-$TAG-$target.*" | wc -l | tr -d " ")
+            if [ "$n" -ne 1 ]; then
+              echo "::error::$n archives for $target, not 1"
+              exit 1
+            fi
+            count=$((count + 1))
+          done
+          total=$(find archives -maxdepth 1 -type f | wc -l | tr -d " ")
+          if [ "$total" -ne "$count" ]; then
+            echo "::error::$total archives for $count targets"
+            exit 1
+          fi
+          NOTES="Container image: \`$IMAGE:$VERSION\`
+          Binaries: one archive per target below (Linux musl and gnu on amd64/arm64, macOS amd64/arm64)."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "${GITHUB_REPOSITORY#*/} $TAG" --notes "$NOTES"
+          else
+            # --verify-tag: never create a tag here.
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "${GITHUB_REPOSITORY#*/} $TAG" --generate-notes --notes "$NOTES"
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber archives/*
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$LATEST"

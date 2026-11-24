@@ -17,9 +17,17 @@ on:
 permissions:
   contents: read
 
+# A branch keeps only its newest run. On main the runs queue instead: a run that is releasing must
+# finish, and the next one then starts from the tag it pushed. The event is in the group, so a run
+# started by hand (which never releases) cannot replace a push run waiting in the queue.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# bash -eo pipefail: a failing command inside a pipe fails the step.
+defaults:
+  run:
+    shell: bash
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,8 +36,10 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-23
         with:
           toolchain: "1.99.1"
           components: rustfmt
@@ -38,67 +48,91 @@ jobs:
   proto-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: snodra/snodra-server
           ref: ${{ vars.SNODRA_SERVER_REF || 'main' }}
           path: server
+          persist-credentials: false
       - name: hub.proto must equal the server's
         run: SNODRA_PROTO_SYNC_REQUIRED=true SNODRA_PROTO_SOURCE="$GITHUB_WORKSPACE/server/proto/hub.proto" bash scripts/check-proto-sync.sh
 
   contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: the contract and its schemas agree
         run: bash scripts/check-contract.sh
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-23
         with:
           toolchain: "1.99.1"
           components: clippy
-      - uses: arduino/setup-protoc@v3
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           version: "29.3"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          toolchain: "1.99.1"
-      - uses: arduino/setup-protoc@v3
-        with:
-          version: "29.3"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@v3
+          persist-credentials: false
+      # The hub image first, then log out: nothing built or run below finds the Docker Hub login.
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # The repository variable SNODRA_SERVER_VERSION, when set, overrides the hub version pinned here.
       - name: the server image every check needs
+        env:
+          SERVER: snodra/snodra-server:${{ vars.SNODRA_SERVER_VERSION || '0.6.0' }}
         run: |
-          docker pull "snodra/snodra-server:${{ vars.SNODRA_SERVER_VERSION || '0.5.0' }}"
-          docker tag "snodra/snodra-server:${{ vars.SNODRA_SERVER_VERSION || '0.5.0' }}" snodra-server:dev
-      - uses: Swatinem/rust-cache@v2
+          docker pull "$SERVER"
+          docker tag "$SERVER" snodra-server:dev
+          docker logout docker.io
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-23
+        with:
+          toolchain: "1.99.1"
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "29.3"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --workspace --all-features -- --test-threads=1
 
-  # The release image of the runner (Dockerfile) must keep building: every workspace member's
-  # manifest is copied into it. Build only, nothing is pushed.
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: for t in scripts/*.test.sh; do sh "$t" || exit 1; done
+
+  # The runner's image (Dockerfile) must keep building: every workspace member's manifest is
+  # copied into it. Build only, nothing is pushed.
   release-image:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - run: docker build -t snodra-conformance:ci .
 
   # Services on the Kotlin, Rust and Go libraries talk to each other through a real hub
@@ -108,14 +142,235 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-23
         with:
           toolchain: "1.99.1"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The inputs reach the script only as variables.
       - name: every language sends to every other
         env:
-          SNODRA_SERVER_VERSION: ${{ vars.SNODRA_SERVER_VERSION || '0.5.4' }}
+          SNODRA_SERVER_VERSION: ${{ vars.SNODRA_SERVER_VERSION || '0.6.0' }}
           GO_REF: ${{ inputs.go_ref }}
           LANGUAGES: ${{ inputs.languages }}
         run: interop/run.sh
+
+  # Versions are cut here, from the Conventional Commit subjects since the last tag
+  # (scripts/next-version.sh): feat -> minor, fix/perf -> patch, anything else -> no release.
+  # Below 1.0.0 nothing computes a major; 1.0.0 is declared by hand.
+  #
+  # `version` computes the version. `package` applies the bump and records its tree. `binaries`
+  # and `image` build every release target and the image from that tree, exactly as the release
+  # will, so nothing is tagged that the release cannot build. None of them has a write token or a
+  # publishing secret. `push` writes the same bump, checks it gives the same tree, commits, tags
+  # and pushes.
+  version:
+    needs: [fmt, proto-sync, contract, clippy, test, scripts, release-image]
+    # Pushes to main of this repository only: never a fork or a pull request, and never the
+    # release commit itself (a GITHUB_TOKEN push starts no workflow anyway).
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && github.repository_owner == 'snodra'
+      && !startsWith(github.event.head_commit.message, 'release:')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: next version
+        id: next
+        run: |
+          main=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+          if [ "$main" != "$GITHUB_SHA" ]; then
+            echo "::notice::main is at $main, not $GITHUB_SHA: a newer push releases it, or this is a re-run of a run that released. Nothing to do. To finish a failed release, re-run its failed jobs or run the release workflow with the tag."
+            exit 0
+          fi
+          last=$(git tag --merged HEAD --list 'v*' | scripts/last-tag.sh)
+          range=${last:+$last..}HEAD
+          version=$(
+            { git log --format=%s "$range"
+              git log -E --grep='^BREAKING[ -]CHANGE:' --format='BREAKING CHANGE: %h' "$range"
+            } | scripts/next-version.sh "$last"
+          )
+          echo "last tag: ${last:-none}; next version: ${version:-none, no release}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The release pushes the image with these secrets: without them, stop before anything is
+      # tagged. Only whether they are set reaches the shell, never their values.
+      - name: the Docker Hub secrets are set
+        if: steps.next.outputs.version != ''
+        env:
+          HAS_USERNAME: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+          HAS_TOKEN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        run: |
+          if [ "$HAS_USERNAME" != true ] || [ "$HAS_TOKEN" != true ]; then
+            echo "::error::the secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must both be set, so nothing is tagged"
+            exit 1
+          fi
+
+  # The bumped tree, recorded: every later job builds this tree and `push` commits it. The manifest
+  # and the lock must agree (--locked) and carry the version.
+  package:
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    outputs:
+      tree: ${{ steps.bump.outputs.tree }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: bump
+        id: bump
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          scripts/bump-version.sh "$VERSION"
+          git add -u
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          git diff --cached --stat
+      - name: the manifest and the lock carry the version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          rustup toolchain install --profile minimal --no-self-update
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          jq -e --arg v "$VERSION" \
+            '[.packages[] | select(.name == "snodra-conformance") | .version] == [$v]' \
+            "$RUNNER_TEMP/metadata.json"
+
+  # Every release target, from the bumped tree (binaries.yml applies the bump and checks the tree).
+  binaries:
+    needs: [version, package]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/binaries.yml
+    with:
+      commit: ${{ github.sha }}
+      version: ${{ needs.version.outputs.version }}
+      bump: true
+      tree: ${{ needs.package.outputs.tree }}
+
+  # The image from the bumped tree, without login or push, and the version its runner reports.
+  # One platform: the release builds the same Dockerfile for arm64 too, and `binaries` builds the
+  # arm64 Linux binaries here.
+  image:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: the bumped tree
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TREE: ${{ needs.package.outputs.tree }}
+        run: |
+          scripts/bump-version.sh "$VERSION"
+          git add -u
+          if [ "$(git write-tree)" != "$TREE" ]; then
+            echo "::error::the bump differs from the tree the package job checked"
+            exit 1
+          fi
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      # context: . builds the working tree (with the bump), not the commit.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: snodra-conformance:release-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: the image reports the version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          got=$(docker run --rm snodra-conformance:release-check --version)
+          echo "$got"
+          if [ "$got" != "snodra-conformance $VERSION" ]; then
+            echo "::error::the image reports '$got', not snodra-conformance $VERSION"
+            exit 1
+          fi
+
+  push:
+    needs: [version, package, binaries, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+    # Hooks off for every git command of this job.
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: core.hooksPath
+      GIT_CONFIG_VALUE_0: /dev/null
+    steps:
+      # Keeps its credentials (in the checkout's git config, never on a command line): this job
+      # pushes. It runs no third-party action after this one and builds nothing.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: commit and tag
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TREE: ${{ needs.package.outputs.tree }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          scripts/bump-version.sh "$VERSION"
+          git add -u
+          if [ "$(git write-tree)" != "$TREE" ]; then
+            echo "::error::the bump differs from the tree the package job checked"
+            exit 1
+          fi
+          git commit -m "release: $VERSION"
+          git tag -a "v$VERSION" -m "${GITHUB_REPOSITORY#*/} v$VERSION"
+
+      - name: push
+        id: push
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # Both or neither, and only as a fast-forward of the commit this run tested.
+          if ! git push --atomic origin HEAD:refs/heads/main "refs/tags/v$VERSION"; then
+            main=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+            if [ "$main" = "$(git rev-parse HEAD)" ]; then
+              # The push landed and only the client saw an error: release it.
+              git ls-remote --exit-code origin "refs/tags/v$VERSION" >/dev/null \
+                || { echo "::error::main has the release commit but not v$VERSION"; exit 1; }
+              echo "::warning::git reported an error, but the release commit and v$VERSION are on the remote"
+            elif [ "$main" != "$GITHUB_SHA" ]; then
+              echo "::notice::main moved during the release; the run for the newer commit releases"
+              exit 0
+            else
+              echo "::error::the push to main was refused: check that github-actions may push to main"
+              exit 1
+            fi
+          fi
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+  # A tag pushed with GITHUB_TOKEN starts no workflow, so the release runs here.
+  release:
+    needs: push
+    if: needs.push.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.push.outputs.tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
