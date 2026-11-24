@@ -7,7 +7,7 @@
 //! no-backoff, signed-rendezvous, sticky-unkeyed, no-permits, unbatched-permits, seq-from-zero,
 //! no-signature-check, no-tls-verify, mtls-no-reload, renew-late, keep-subscriptions,
 //! no-subscription-limit, retry-after-timeout, case-sensitive-headers, no-subscription-types,
-//! drop-silent-early, token-after-lookup, wrong-mode-code.
+//! drop-silent-early, token-after-lookup, wrong-mode-code, hop-remaining-timeout.
 //!
 //! Without a violation it is the baseline the mutation test compares against: every check of the
 //! target's group keeps the verdict it has without the violation.
@@ -1074,6 +1074,14 @@ async fn guarded(st: &State, r: &Request, p: &Value) -> client_message::Message 
 /// `retry-after-timeout`).
 async fn send(st: &Arc<State>, spec: &Value) -> Value {
     let started = Instant::now();
+    let mut outcome = send_once(st, spec).await;
+    outcome["elapsedMs"] = json!(started.elapsed().as_millis() as u64);
+    outcome
+}
+
+/// One `conformance.Send` as above, without its elapsed time.
+async fn send_once(st: &Arc<State>, spec: &Value) -> Value {
+    let started = Instant::now();
     let type_name = match spec["target"].as_str() {
         Some("probe-query") => "conformance.runner.ProbeQuery",
         _ => "conformance.runner.Probe",
@@ -1120,53 +1128,68 @@ async fn send(st: &Arc<State>, spec: &Value) -> Value {
         let live: Vec<usize> = (0..st.conns.len())
             .filter(|i| st.conns[*i].acked.load(Ordering::SeqCst))
             .collect();
-        let Some(i) = pick(st, &live, spec["routingKey"].as_str()) else {
+        let key = spec["routingKey"].as_str();
+        let Some(first) = pick(st, &live, key) else {
             return last;
         };
-        let mut r = wire::request(&wire::new_id(), kind, type_name, &spec["payload"]);
-        r.headers = headers.clone();
-        r.routing_key = spec["routingKey"].as_str().unwrap_or_default().into();
-        let left = budget.saturating_sub(started.elapsed());
-        r.timeout_ms = if st.retry.is_some() {
-            left.as_millis().max(1) as u32
-        } else {
-            chosen.unwrap_or(0) as u32
-        };
-        let (tx, rx) = oneshot::channel();
-        st.pending.lock().unwrap().insert(r.id.clone(), (i, tx));
-        let generation = st.conns[i].generation.load(Ordering::SeqCst);
-        send_on(st, i, generation, client_message::Message::Request(r));
-        let answer = tokio::time::timeout(left + Duration::from_secs(1), rx).await;
-        let (code, outcome) = match answer {
-            Ok(Ok(ServerMessage {
-                message:
-                    Some(server_message::Message::Reply(Reply {
-                        result: Some(reply::Result::Payload(p)),
-                        ..
-                    })),
-            })) => return json!({ "result": "ok", "payload": wire::json(&p) }),
-            Ok(Ok(ServerMessage {
-                message:
-                    Some(
-                        server_message::Message::Error(e)
-                        | server_message::Message::Reply(Reply {
-                            result: Some(reply::Result::Error(e)),
+        // A NO_HANDLER from one hub: the same request (same id) to the other live hubs in turn,
+        // in the order it chose its first hub by, each with the caller's full timeout (what is
+        // left of it with `hop-remaining-timeout`).
+        let id = wire::new_id();
+        let hops = hop_order(st, &live, key, first);
+        let mut code = 0;
+        let mut outcome = Value::Null;
+        for (hop, i) in hops.iter().copied().enumerate() {
+            let mut r = wire::request(&id, kind, type_name, &spec["payload"]);
+            r.headers = headers.clone();
+            r.routing_key = key.unwrap_or_default().into();
+            let left = budget.saturating_sub(started.elapsed());
+            r.timeout_ms = if st.retry.is_some() {
+                left.as_millis().max(1) as u32
+            } else if hop > 0 && chosen.is_some() && violation("hop-remaining-timeout") {
+                left.as_millis() as u32
+            } else {
+                chosen.unwrap_or(0) as u32
+            };
+            let (tx, rx) = oneshot::channel();
+            st.pending.lock().unwrap().insert(r.id.clone(), (i, tx));
+            let generation = st.conns[i].generation.load(Ordering::SeqCst);
+            send_on(st, i, generation, client_message::Message::Request(r));
+            let answer = tokio::time::timeout(left + Duration::from_secs(1), rx).await;
+            (code, outcome) = match answer {
+                Ok(Ok(ServerMessage {
+                    message:
+                        Some(server_message::Message::Reply(Reply {
+                            result: Some(reply::Result::Payload(p)),
                             ..
-                        }),
-                    ),
-            })) => (
-                e.code,
-                json!({ "result": "error", "error": { "kind": "code", "code": wire::code_name(e.code), "message": e.message } }),
-            ),
-            Ok(_) => (
-                0,
-                json!({ "result": "error", "error": { "kind": "outcome-unknown" } }),
-            ),
-            Err(_) => (
-                2,
-                json!({ "result": "error", "error": { "kind": "code", "code": "TIMEOUT" } }),
-            ),
-        };
+                        })),
+                })) => return json!({ "result": "ok", "payload": wire::json(&p) }),
+                Ok(Ok(ServerMessage {
+                    message:
+                        Some(
+                            server_message::Message::Error(e)
+                            | server_message::Message::Reply(Reply {
+                                result: Some(reply::Result::Error(e)),
+                                ..
+                            }),
+                        ),
+                })) => (
+                    e.code,
+                    json!({ "result": "error", "error": { "kind": "code", "code": wire::code_name(e.code), "message": e.message } }),
+                ),
+                Ok(_) => (
+                    0,
+                    json!({ "result": "error", "error": { "kind": "outcome-unknown" } }),
+                ),
+                Err(_) => (
+                    2,
+                    json!({ "result": "error", "error": { "kind": "code", "code": "TIMEOUT" } }),
+                ),
+            };
+            if code != 1 {
+                break;
+            }
+        }
         last = outcome;
         let retryable = violation("retry-after-timeout") || code == 1 || code == 8;
         if !retryable || n + 1 == attempts {
@@ -1175,6 +1198,40 @@ async fn send(st: &Arc<State>, spec: &Value) -> Value {
         tokio::time::sleep(Duration::from_millis(backoff)).await;
     }
     last
+}
+
+/// The hubs a request tries after a NO_HANDLER, `first` first: by rendezvous score for a key,
+/// else round-robin order from `first`.
+fn hop_order(st: &State, live: &[usize], key: Option<&str>, first: usize) -> Vec<usize> {
+    let id_of = |i: usize| {
+        st.conns[i]
+            .hub_id
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default()
+    };
+    let mut order = vec![first];
+    match key.filter(|k| !k.is_empty()) {
+        Some(key) => {
+            let ids: Vec<String> = live.iter().map(|i| id_of(*i)).collect();
+            let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            for hub in rendezvous::ranking(&refs, key) {
+                if let Some(i) = live.iter().copied().find(|i| id_of(*i) == hub)
+                    && !order.contains(&i)
+                {
+                    order.push(i);
+                }
+            }
+        }
+        None => {
+            let at = live.iter().position(|i| *i == first).unwrap_or(0);
+            for k in 1..live.len() {
+                order.push(live[(at + k) % live.len()]);
+            }
+        }
+    }
+    order
 }
 
 fn pick(st: &State, live: &[usize], key: Option<&str>) -> Option<usize> {

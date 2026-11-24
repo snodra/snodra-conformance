@@ -228,7 +228,7 @@ time bound comes from the rule the check proves, with a tolerance for scheduling
 | `L1-HUBS` | fake, two hubs | three targets, two answering one hub id: one stable stream for that id, `Register`s identical apart from `initial_permits` (each stream's share, `L1-HUB-PERMITS`), `conformance.View` knows two hubs; with two real hubs, the topology of each shows the instance reporting both hub ids |
 | `L1-HUB-ROUTING` | fake | hubs `hub-1` and `hub-2` (the test vectors' ids): keyed sends land on the rendezvous winner (`order-42` on `hub-2`), among them keys a signed comparison of the scores would send elsewhere; unkeyed ones alternate (round-robin over the two acknowledged hubs) |
 | `L1-HUB-PERMITS` | fake | capacity 5 offers 3 to each; one hub gone: the other gets `Permits{count 2, grant 5}`; the hub back gets 3 |
-| `L1-HUB-FAILOVER` | fake | `NO_HANDLER` from the first hub (rendezvous order for a key, round-robin otherwise): the same id on the other hub; both declining: `NO_HANDLER` within 1.5 s |
+| `L1-HUB-FAILOVER` | fake | `NO_HANDLER` from the first hub (rendezvous order for a key, round-robin otherwise): the same id on the other hub, and every hop carries the caller's full timeout (`Request.timeout_ms` 5000 on both, never what is left); both declining: `NO_HANDLER` within 1.5 s |
 | `L1-STATUS` | fake | two hubs: an `InstanceStatus` at least every 5 s (no two more than 6.5 s apart, and none missing for 6.5 s at the end of the observation; extra reports are allowed) on each stream, naming both hub ids and the two handlers running |
 
 What no check can observe from outside is listed in

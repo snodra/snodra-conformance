@@ -30,7 +30,8 @@ conformance contract — connects it to a real Snodra Server and to fake hubs of
 - **Fake hubs** prove most checks, scripting what a healthy server rarely or never produces: the
   handshake and its refusals, heartbeats, silent hubs and reconnects, timeouts, every error code,
   never-sent and unknown outcomes, retries, permits, streaming and subscription credit, lost streams,
-  credentials (token, JWT, client certificates, TLS), and routing, permits and failover over two hubs.
+  credentials (token, JWT, client certificates, TLS), and routing, permits and failover over two hubs
+  (the same request id and the caller's full timeout on every hop).
 - **Real server checks**: an idle instance stays registered, commands and point queries through the
   hub with a routing key, shared query types, scatter-gather, and the topology of two real hubs.
 - **Mutation matrix**: deliberately broken services (the reference service broken at its contract

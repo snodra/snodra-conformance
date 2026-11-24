@@ -268,8 +268,9 @@ pub async fn hub_failover(run: Run) -> CheckResult {
             }
         });
     }
-    let tries = |case: &str| -> Vec<(Instant, String, String)> {
-        let mut all: Vec<(Instant, String, String)> = [&h1, &h2]
+    // (arrival, hub id, request id, Request.timeout_ms) of every try of `case`.
+    let tries = |case: &str| -> Vec<(Instant, String, String, u32)> {
+        let mut all: Vec<(Instant, String, String, u32)> = [&h1, &h2]
             .iter()
             .flat_map(|f| {
                 let hub = f.hub_id();
@@ -277,11 +278,11 @@ pub async fn hub_failover(run: Run) -> CheckResult {
                     .iter()
                     .flat_map(|s| requests_of(s, "conformance.runner.Probe"))
                     .filter(|(_, r)| wire::json(&r.payload)["case"] == case)
-                    .map(move |(t, r)| (t, hub.clone(), r.id))
+                    .map(move |(t, r)| (t, hub.clone(), r.id, r.timeout_ms))
                     .collect::<Vec<_>>()
             })
             .collect();
-        all.sort_by_key(|(t, _, _)| *t);
+        all.sort_by_key(|(t, _, _, _)| *t);
         all
     };
     let send = |case: &str, key: Option<&str>| {
@@ -291,6 +292,20 @@ pub async fn hub_failover(run: Run) -> CheckResult {
         }
         s1.command("conformance.Send", spec)
     };
+    // protocol.md, Several hubs: every hop carries the caller's full timeout, never what is left.
+    let tried = |t: &[(Instant, String, String, u32)]| {
+        t.iter()
+            .map(|(_, h, id, ms)| format!("{h}:{id}:{ms}"))
+            .collect::<Vec<_>>()
+    };
+    let full = |what: &str, t: &[(Instant, String, String, u32)]| -> Result<(), Problem> {
+        ensure!(
+            t.iter().all(|(_, _, _, ms)| *ms == 5000),
+            "{what}: a hop without the caller's full timeout (5000 ms): tried {:?} (hub:id:timeout_ms)",
+            tried(t)
+        );
+        Ok(())
+    };
     let v = outcome(send("f1", Some("order-42")).await, "a keyed send")?;
     let t = tries("f1");
     ensure!(
@@ -299,22 +314,20 @@ pub async fn hub_failover(run: Run) -> CheckResult {
             && t[0].1 == "hub-2"
             && t[1].1 == "hub-1"
             && t[0].2 == t[1].2,
-        "keyed order-42 (hub-2 first), hub-2 NO_HANDLER: tried {:?}, came back {}",
-        t.iter()
-            .map(|(_, h, id)| format!("{h}:{id}"))
-            .collect::<Vec<_>>(),
+        "keyed order-42 (hub-2 first), hub-2 NO_HANDLER: tried {:?} (hub:id:timeout_ms), came back {}",
+        tried(&t),
         error_of(&v)
     );
+    full("keyed order-42, hub-2 NO_HANDLER", &t)?;
     let v = outcome(send("f2", None).await, "an unkeyed send")?;
     let t = tries("f2");
     ensure!(
         v["result"] == "ok" && t.len() == 2 && t[0].1 != t[1].1 && t[0].2 == t[1].2,
-        "unkeyed, first hub NO_HANDLER: tried {:?}, came back {}",
-        t.iter()
-            .map(|(_, h, id)| format!("{h}:{id}"))
-            .collect::<Vec<_>>(),
+        "unkeyed, first hub NO_HANDLER: tried {:?} (hub:id:timeout_ms), came back {}",
+        tried(&t),
         error_of(&v)
     );
+    full("unkeyed, first hub NO_HANDLER", &t)?;
     let v: Value = outcome(send("f3", Some("order-42")).await, "a keyed send")?;
     let t = tries("f3");
     let elapsed = v["elapsedMs"].as_u64().unwrap_or(u64::MAX);
@@ -325,9 +338,9 @@ pub async fn hub_failover(run: Run) -> CheckResult {
             && t[0].1 == "hub-2"
             && elapsed < 1500,
         "every hub NO_HANDLER: tried {:?}, came back {} after {elapsed} ms (expected NO_HANDLER at once)",
-        t.iter().map(|(_, h, _)| h.clone()).collect::<Vec<_>>(),
+        t.iter().map(|(_, h, _, _)| h.clone()).collect::<Vec<_>>(),
         error_of(&v)
     );
-    Ok("NO_HANDLER moved to the next hub in rendezvous and round-robin order with the same id; all declining came back at once. \
+    Ok("NO_HANDLER moved to the next hub in rendezvous and round-robin order with the same id and the full timeout; all declining came back at once. \
         Not checked: a request never handed to the transport moving to another hub (no deterministic way to hold it in the library's buffer)".into())
 }

@@ -256,10 +256,19 @@ const VIOLATIONS: &[Mutation] = &[
         CREDENTIALS,
         &[],
     ),
+    // A keyed request's first hub is the rendezvous winner: a wrong winner breaks the failover
+    // order too.
     (
         "signed-rendezvous",
         "L1-HUB-ROUTING",
         "unsigned scores",
+        HUBS,
+        &["L1-HUB-FAILOVER"],
+    ),
+    (
+        "hop-remaining-timeout",
+        "L1-HUB-FAILOVER",
+        "a hop without the caller's full timeout",
         HUBS,
         &[],
     ),
