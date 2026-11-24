@@ -12,7 +12,7 @@
   <a href="https://github.com/snodra/snodra-conformance/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/snodra/snodra-conformance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/snodra/snodra-conformance/releases"><img alt="release" src="https://img.shields.io/github/v/release/snodra/snodra-conformance"></a>
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.99.1-000000?logo=rust&logoColor=white">
-  <a href="https://snodra.damoreira.com/"><img alt="docs" src="https://img.shields.io/badge/docs-snodra.damoreira.com-0B5FFF"></a>
+  <a href="https://snodra.damoreira.com/docs/"><img alt="docs" src="https://img.shields.io/badge/docs-snodra.damoreira.com-0B5FFF"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
@@ -70,9 +70,9 @@ service, or build an image `FROM` it).
 
 The conformance contract (the `conformance.*` message types a conformance service handles, and what each check does to it) is [docs/contract.md](docs/contract.md), with one JSON Schema per type in [contract/](contract/).
 
-The checks and the feature levels they prove: **<https://snodra.damoreira.com/library-authors/conformance/>**
-and <https://snodra.damoreira.com/library-authors/feature-levels/>. The runner's page among the tools:
-<https://snodra.damoreira.com/tools/conformance-runner/>.
+The checks and the feature levels they prove: **<https://snodra.damoreira.com/docs/library-authors/conformance/>**
+and <https://snodra.damoreira.com/docs/library-authors/feature-levels/>. The runner's page among the tools:
+<https://snodra.damoreira.com/docs/tools/conformance-runner/>.
 
 ## Contributing
 
