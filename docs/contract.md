@@ -146,7 +146,7 @@ The payload ([schema](../contract/conformance.Send.json)):
 | Field | Meaning |
 |---|---|
 | `op` | `unary`, `scatter` (a scatter-gather), `stream`, `subscribe` |
-| `target` | `probe`, `probe-query`, `missing`, `probe-stream`, `probe-watch` (the runner's types); `echo`, `echo-query`, `shared-query`, `stream`, `watch` (the service's own) |
+| `target` | `probe`, `probe-query`, `missing`, `probe-stream`, `probe-watch` (the runner's types); `echo`, `echo-query`, `shared-query`, `stream`, `watch` (the service's own, [below](#sends-to-the-services-own-types)) |
 | `payload` | the request's payload |
 | `routingKey`, `timeoutMs`, `headers` | the caller's routing key, its timeout (absent: the caller chose none) and headers added through the library's generic header option |
 | `retry` | optional: `{maxAttempts, initialBackoffMs}` for this call only, for a library that takes a policy per call (the runner sets the policy for every send with `CONFORMANCE_RETRY_*`) |
@@ -170,6 +170,21 @@ decoded `payload` (unary), the `items` and how they `end`ed (`completed`, `stopp
 
 The service classifies by the library's typed errors where it has them; where it has none, it says so (the Rust
 library reports lost parts and a refused header as one error variant, `MessagingError::InvalidMessage`, told apart by its text).
+
+### Sends to the service's own types
+
+By default a library answers a command, and a point query of a type that is not shared, in-process when the instance
+handles the type itself: nothing goes through the hub, and the routing key is ignored
+([protocol.md, Requests a service answers itself](https://snodra.damoreira.com/library-authors/protocol/#requests-a-service-answers-itself)).
+So a unary `conformance.Send` to `echo` or `echo-query` never reaches the hub unless the service turns on its library's
+"always route through the hub" setting. A scatter-gather, a stream, a subscription and a query of a shared type always
+go through the hub.
+
+No level-1 check sends to the service's own types: the checks send only to the runner's types, which the service never
+handles, so the setting changes no verdict. The interoperability harness (`interop/`) does send to them, to make one
+language call another through the hub. A conformance service should therefore turn the setting on. The reference
+service and the Go conformance service do; a service that keeps the default answers those sends itself, and the
+harness reports them as not exercised (its `LOCAL_SENDERS`).
 
 ## How each check is proved
 

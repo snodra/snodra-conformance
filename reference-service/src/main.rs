@@ -257,6 +257,10 @@ impl Env {
         }
         c.jwks_url = self.jwks_url.clone();
         c.issuer = self.issuer.clone();
+        // A send to one of the service's own types (`conformance.Send` to `echo`, `echo-query`)
+        // goes through the hub like any other, instead of being answered in-process: the hub then
+        // routes it by its routing key, as the interop harness needs.
+        c.hub_always_route_through_hub = true;
         // Commands and queries only: no event store, no message store (level 1).
         c.consumer_enabled = false;
         c.outbox_enabled = false;

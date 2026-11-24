@@ -27,8 +27,8 @@ struct Args {
     /// The languages that must be registered, comma-separated; each is its instance id
     #[arg(long, value_delimiter = ',')]
     languages: Vec<String>,
-    /// Languages whose library answers a unary send of a type it also handles in its own
-    /// process without the hub (the Kotlin library does): those sends never leave the process,
+    /// Languages whose service answers a unary send of a type it also handles in its own
+    /// process without the hub (the Kotlin service does): those sends never leave the process,
     /// so the driver reports them as not exercised instead of counting them as exchanges
     #[arg(long, value_delimiter = ',')]
     local_senders: Vec<String>,

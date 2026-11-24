@@ -8,10 +8,10 @@
 # Receiver holds 7000), INTEROP_PROJECT (the compose project name; default snodra-interop-<pid>, so two
 # runs on one host do not stop each other, but two runs need two SNODRA_HUB_PORT values),
 # INTEROP_STRICT=1 (exit non-zero when a required exchange could not go through the hub),
-# LOCAL_SENDERS (languages whose library answers a unary send to a type it
+# LOCAL_SENDERS (languages whose service answers a unary send to a type it
 # handles itself without the hub; default kotlin), GO_REF / GO_SRC and KOTLIN_REF / KOTLIN_SRC (see compose.yaml).
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
-# were not exercised (languages whose library answers its own types in-process, kotlin by default);
+# were not exercised (languages whose service answers its own types in-process, kotlin by default);
 # with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
 

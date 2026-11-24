@@ -16,8 +16,8 @@ It needs Docker with compose (it builds three images and starts the hub image
 line per exchange and stops everything it started.
 
 **Read the summary line, not only the exit code.** Every exchange that runs must pass, but some required
-exchanges cannot go through the hub with the Kotlin library (see "Known limits"). They are **not exercised**,
-and the last line says so:
+exchanges cannot go through the hub with the Kotlin conformance service (see "Known limits"). They are **not
+exercised**, and the last line says so:
 
 ```text
 interop: 3 languages, 17 exchanges passed through the hub, 3 not exercised (kotlin answers its own types
@@ -54,7 +54,7 @@ in `compose.yaml` (the line marked "To change at release") to the release tag.**
    one language to another.
 4. From every X: a scatter-gather on `conformance.EchoQuery` answers a part from every language, each in the run's
    trace; a unary `conformance.EchoQuery` round-trips its payload in the run's trace (the hub picks the serving
-   instance; not exercised for a sender whose library answers it in-process).
+   instance; not exercised for a sender that answers it in-process).
 5. From every X: a streaming `conformance.Stream` of 5 items arrives complete and in order. The hub picks the
    serving instance and it is not observable, so which language served is not asserted.
 6. From every X: a `conformance.Watch` subscription (initial result plus one update per language). The hub
@@ -70,14 +70,17 @@ in `compose.yaml` (the line marked "To change at release") to the release tag.**
 
 ## Known limits
 
-- **Not exercised: sends the sender's library answers in-process.** The Kotlin library answers a unary
-  send of a type its own process handles without the hub (a short-circuit that ignores the routing key).
-  Kotlin sending a keyed `Echo` to Go or Rust, and a unary `EchoQuery`, therefore never leaves the process:
-  these exchanges are required but **cannot be exercised through the hub**, and are reported as not
-  exercised, never as passed. `run.sh` passes `--local-senders ${LOCAL_SENDERS:-kotlin}` to name the
-  languages known to do this; for any other language the full assertions apply, and a listed language whose
-  send does reach the hub is asserted in full. Kotlin as a sender through the hub is covered by the scatter,
-  stream, subscription and relay exchanges (4 to 7). Use `INTEROP_STRICT=1` to fail on them.
+- **Not exercised: sends the sender answers in-process.** Every official library answers a command, and a
+  point query of a type that is not shared, in-process when its own instance handles the type: the hub is
+  not used and the routing key is ignored. Every service here handles `Echo` and `EchoQuery`, so such a send
+  reaches another language only when the service turns on its library's "always route through the hub"
+  setting. The Rust and Go services do; the Kotlin service keeps the default. Kotlin sending a keyed `Echo`
+  to Go or Rust, and a unary `EchoQuery`, therefore never leaves the process: these exchanges are required
+  but **cannot be exercised through the hub**, and are reported as not exercised, never as passed. `run.sh`
+  passes `--local-senders ${LOCAL_SENDERS:-kotlin}` to name the languages that do this; for any other
+  language the full assertions apply, and a listed language whose send does reach the hub is asserted in
+  full. Kotlin as a sender through the hub is covered by the scatter, stream, subscription and relay
+  exchanges (4 to 7). Use `INTEROP_STRICT=1` to fail on them.
 - **Streaming.** The serving instance of a stream is chosen by the hub (routing keys are ignored for
   queries); the harness checks the items, not who produced them.
 - **Outcome.** `conformance.Outcome` is a query, so the hub may route it to an instance that does not own the
