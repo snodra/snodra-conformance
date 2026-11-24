@@ -20,10 +20,10 @@ services:
     <<: *service
     build:
       context: images/go
-      # snodra-messaging-go's tag v0.1.0 carries examples/conformance-service.
+      # snodra-messaging-go's tag v0.1.1 carries examples/conformance-service.
       # GO_REF overrides the ref (for example GO_REF=main); GO_SRC names a local checkout instead.
       additional_contexts:
-        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.1.0}}
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.1.1}}
     environment:
       CONFORMANCE_SERVICE_NAME: conformance-interop
       CONFORMANCE_INSTANCE_ID: go
@@ -45,11 +45,11 @@ services:
     <<: *service
     build:
       context: images/kotlin
-      # snodra-messaging's tag v0.6.0 carries examples/conformance-service (the Kotlin library
+      # snodra-messaging's tag v0.6.1 carries examples/conformance-service (the Kotlin library
       # publishes no conformance service artifact, so the harness builds it from the tag).
       # KOTLIN_REF overrides the ref; KOTLIN_SRC names a local checkout instead.
       additional_contexts:
-        kotlinsrc: ${KOTLIN_SRC:-https://github.com/snodra/snodra-messaging.git#${KOTLIN_REF:-v0.6.0}}
+        kotlinsrc: ${KOTLIN_SRC:-https://github.com/snodra/snodra-messaging.git#${KOTLIN_REF:-v0.6.1}}
     environment:
       CONFORMANCE_SERVICE_NAME: conformance-interop
       CONFORMANCE_INSTANCE_ID: kotlin
