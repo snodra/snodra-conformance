@@ -139,7 +139,7 @@ const VIOLATIONS: &[Mutation] = &[
     (
         "drop-silent-early",
         "L1-SILENT-HUB",
-        "expected between three and four intervals",
+        "with 2 heartbeats unanswered",
         CONNECTION,
         &[],
     ),

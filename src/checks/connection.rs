@@ -407,13 +407,19 @@ pub async fn silent_hub(run: Run) -> CheckResult {
         "with heartbeat_interval_ms {INTERVAL} the silent stream was closed by the hub, not dropped by the library"
     );
     // protocol.md: on a heartbeat tick after the ack, the hub is silent when more than three
-    // intervals passed since its last echo and the three heartbeats written since it are
-    // unanswered: the drop comes between three and four intervals after the last echo. The
-    // echo left the fake hub before the library read it, so nothing is subtracted below; 750 ms
-    // above for scheduling.
+    // intervals passed since its last echo (the ack counts as the first) and the three heartbeats
+    // written since it are unanswered; the drop comes on that tick, before its heartbeat. So the
+    // count decides: three heartbeats after the last echo. A heartbeat written after a later
+    // Register counts too; the conformance service registers nothing after its start, but a
+    // library may send a Register again (with a heartbeat after it) within the window, so up to
+    // one more is allowed. Five means the library let a whole interval pass after the rule held.
+    // The times only bound the check: the echo left the fake hub before the library read it, so
+    // the drop is never measured earlier than it was (no less than three intervals), and the
+    // ceiling (four intervals plus 2 s) only stops a hang from passing; scheduling decides
+    // nothing.
     let last = s0
         .last_echo()
-        .or_fail("the fake hub never echoed a heartbeat")?;
+        .or_fail("the fake hub neither acknowledged nor echoed")?;
     let after = ms(closed.saturating_duration_since(last));
     let unanswered = s0
         .select(|m| match &m.message {
@@ -424,9 +430,16 @@ pub async fn silent_hub(run: Run) -> CheckResult {
         .filter(|(t, _)| *t > last)
         .count();
     ensure!(
-        (3 * INTERVAL..=4 * INTERVAL + 750).contains(&after) && unanswered >= 3,
+        (3..=4).contains(&unanswered),
+        "with heartbeat_interval_ms {INTERVAL} the silent stream was dropped with {unanswered} heartbeats unanswered \
+         since the last echo, {after} ms after it (expected the drop on the tick after the third unanswered heartbeat: \
+         three, or four with one written after a later Register)"
+    );
+    ensure!(
+        (3 * INTERVAL..=4 * INTERVAL + 2000).contains(&after),
         "with heartbeat_interval_ms {INTERVAL} the silent stream was dropped {after} ms after the last echo, \
-         with {unanswered} heartbeats unanswered (expected between three and four intervals, after three unanswered heartbeats)"
+         with {unanswered} heartbeats unanswered (expected more than three intervals, and not hanging past four \
+         intervals plus 2 s)"
     );
     run.registered(&sut, &fake, 1).await?;
     Ok(format!(

@@ -491,10 +491,11 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
             }
             _ = ticker.tick() => {
                 // Silent after the ack: more than three intervals since the last echo and three
-                // heartbeats unanswered, looked at before this tick's heartbeat (more than two
-                // intervals, whatever was answered, with `drop-silent-early`).
+                // heartbeats unanswered, looked at before this tick's heartbeat. With
+                // `drop-silent-early` two unanswered heartbeats are enough: it breaks the rule
+                // that three must be unanswered.
                 let silent = if violation("drop-silent-early") {
-                    last_echo.elapsed() > interval * 2
+                    unanswered >= 2
                 } else {
                     unanswered >= 3 && last_echo.elapsed() > interval * 3
                 };

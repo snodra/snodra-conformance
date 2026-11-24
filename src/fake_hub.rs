@@ -351,6 +351,8 @@ pub struct Session {
     echo_before_ack: bool,
     ack: Mutex<RegisterAck>,
     acked: AtomicBool,
+    /// When the `RegisterAck` was sent (the first echo, for L1-SILENT-HUB).
+    acked_at: Mutex<Option<Instant>>,
     permits: Mutex<Permits>,
     /// The types of the latest `Register` (an empty one takes the instance out of the routing).
     types: Mutex<Vec<String>>,
@@ -414,6 +416,7 @@ impl Session {
     /// Sends the `RegisterAck` (for a session in [`AckMode::Manual`]).
     pub fn ack(&self) {
         if !self.acked.swap(true, Ordering::SeqCst) {
+            *self.acked_at.lock().unwrap() = Some(Instant::now());
             let ack = self.ack.lock().unwrap().clone();
             self.send(server_message::Message::RegisterAck(ack));
         }
@@ -433,9 +436,13 @@ impl Session {
         self.echo.store(on, Ordering::SeqCst);
     }
 
-    /// When the fake hub last echoed a heartbeat on this stream.
+    /// When the fake hub last echoed a heartbeat on this stream, else when it sent the
+    /// `RegisterAck` (the protocol counts the ack as the first echo).
     pub fn last_echo(&self) -> Option<Instant> {
-        *self.last_echo.lock().unwrap()
+        self.last_echo
+            .lock()
+            .unwrap()
+            .or(*self.acked_at.lock().unwrap())
     }
 
     /// Ends the stream with `status`, as a hub closing it.
@@ -733,6 +740,7 @@ impl Hub for Service {
                 echo_before_ack: inner.echo_before_ack.load(Ordering::SeqCst),
                 ack: Mutex::new(inner.ack.lock().unwrap().clone()),
                 acked: AtomicBool::new(false),
+                acked_at: Mutex::new(None),
                 permits: Mutex::new(Permits::default()),
                 types: Mutex::new(Vec::new()),
                 cancelled: Mutex::new(HashSet::new()),
