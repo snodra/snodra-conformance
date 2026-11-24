@@ -10,7 +10,7 @@ mod support;
 use snodra_conformance::report::{Report, Status};
 
 /// Checks the reference service fails at the pinned library, with the reason (none at
-/// snodra-messaging-rs v0.7.1).
+/// snodra-messaging 0.8.0).
 const KNOWN_FAILURES: &[(&str, &str)] = &[];
 
 fn expect(verdicts: &[snodra_conformance::report::Verdict]) -> Vec<String> {

@@ -1,5 +1,5 @@
 //! The reference conformance service: the conformance contract (`docs/contract.md`) on
-//! snodra-messaging-rs. The runner (`snodra-conformance`) starts it once per check with the
+//! snodra-messaging. The runner (`snodra-conformance`) starts it once per check with the
 //! `CONFORMANCE_*` environment, drives it through a hub and reads what it reports.
 //!
 //! It is written the way an application would use the library: typed messages, handlers that

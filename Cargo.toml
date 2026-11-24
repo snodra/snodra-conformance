@@ -7,7 +7,7 @@ description = "The Snodra conformance runner: proves a client library's feature 
 license = "Apache-2.0"
 publish = false
 
-# The runner, the reference conformance service (on snodra-messaging-rs), the violator and the
+# The runner, the reference conformance service (on snodra-messaging), the violator and the
 # cross-language interoperability driver.
 [workspace]
 members = [".", "reference-service", "violator", "interop/driver"]

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # The Rust reference conformance service of this repository (reference-service, on the
-# snodra-messaging-rs release this repository's Cargo.lock pins). Build context: the repository root.
+# snodra-messaging release this repository's Cargo.lock pins). Build context: the repository root.
 FROM rust:1.99-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*

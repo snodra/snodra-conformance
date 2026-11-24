@@ -3,7 +3,7 @@ name = "snodra-conformance-reference"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
-description = "The reference conformance service on snodra-messaging-rs: the runner's fixture and the example for library authors"
+description = "The reference conformance service on snodra-messaging: the runner's fixture and the example for library authors"
 license = "Apache-2.0"
 publish = false
 
@@ -12,10 +12,10 @@ name = "conformance-reference-service"
 path = "src/main.rs"
 
 [dependencies]
-# snodra-messaging-rs from crates.io, at the release the runner tests (0.7.1 at least: it sends the
+# snodra-messaging from crates.io, at the release the runner tests (0.7.1 at least: it sends the
 # caller's full timeout on every hop): the reference service is also the example for library authors,
 # so it takes the artifact a stranger would.
-snodra-messaging-rs = "0.7.1"
+snodra-messaging = "0.8.0"
 tokio = { version = "1.54.1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }

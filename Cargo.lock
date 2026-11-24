@@ -2968,7 +2968,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
- "snodra-messaging-rs",
+ "snodra-messaging",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3006,10 +3006,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "snodra-messaging-rs"
-version = "0.7.1"
+name = "snodra-messaging"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "281bbf93142552d5405538e8c7d9748f1b301f94ae43828e627a710f937af48d"
+checksum = "873b6c3c12633bea5d72550897fdcda5b970a5a0a81abc7a54a24067b5ef3422"
 dependencies = [
  "base64 0.23.1",
  "chrono",
