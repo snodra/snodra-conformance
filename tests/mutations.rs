@@ -137,6 +137,13 @@ const VIOLATIONS: &[Mutation] = &[
         &[],
     ),
     (
+        "drop-silent-early",
+        "L1-SILENT-HUB",
+        "expected between three and four intervals",
+        CONNECTION,
+        &[],
+    ),
+    (
         "changed-register",
         "L1-RECONNECT",
         "differs from the first",
@@ -184,6 +191,13 @@ const VIOLATIONS: &[Mutation] = &[
         &[],
     ),
     (
+        "token-after-lookup",
+        "L1-IDENTITY",
+        "the token is checked first",
+        REQUESTS,
+        &[],
+    ),
+    (
         "retry-after-timeout",
         "L1-RETRY",
         "answered TIMEOUT",
@@ -209,6 +223,13 @@ const VIOLATIONS: &[Mutation] = &[
         "no-subscription-limit",
         "L1-SUBSCRIBE",
         "was not refused",
+        MODES,
+        &[],
+    ),
+    (
+        "no-subscription-types",
+        "L1-SUBSCRIBE",
+        "Register.subscription_query_types",
         MODES,
         &[],
     ),

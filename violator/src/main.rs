@@ -6,7 +6,8 @@
 //! Violations: heartbeat-first, live-on-echo, ignore-interval, keep-silent, changed-register,
 //! no-backoff, signed-rendezvous, sticky-unkeyed, no-permits, unbatched-permits, seq-from-zero,
 //! no-signature-check, no-tls-verify, mtls-no-reload, renew-late, keep-subscriptions,
-//! no-subscription-limit, retry-after-timeout, case-sensitive-headers.
+//! no-subscription-limit, retry-after-timeout, case-sensitive-headers, no-subscription-types,
+//! drop-silent-early, token-after-lookup.
 //!
 //! Without a violation it is the baseline the mutation test compares against: every check of the
 //! target's group keeps the verdict it has without the violation.
@@ -396,6 +397,12 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
         instance_id: st.instance.clone(),
         command_types: commands,
         query_types: queries,
+        // Its one subscription type (none with `no-subscription-types`).
+        subscription_query_types: if violation("no-subscription-types") {
+            Vec::new()
+        } else {
+            vec!["conformance.Watch".into()]
+        },
         initial_permits: permits,
         client_version: "conformance-violator/0".into(),
         credentials: match (jwt, token) {
@@ -446,6 +453,8 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
     conn.echoed.store(false, Ordering::SeqCst);
     let mut interval = Duration::from_millis(3000);
     let mut last_echo = Instant::now();
+    // Heartbeats written since the last echo (the ack counts as one).
+    let mut unanswered = 0u32;
     let mut reached = false;
     let opened = Instant::now();
     let mut statuses_sent = 0u32;
@@ -481,9 +490,20 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
                 }
             }
             _ = ticker.tick() => {
-                let _ = tx.send(hb()).await;
-                if reached && !violation("keep-silent") && last_echo.elapsed() > interval * 3 {
+                // Silent after the ack: more than three intervals since the last echo and three
+                // heartbeats unanswered, looked at before this tick's heartbeat (more than two
+                // intervals, whatever was answered, with `drop-silent-early`).
+                let silent = if violation("drop-silent-early") {
+                    last_echo.elapsed() > interval * 2
+                } else {
+                    unanswered >= 3 && last_echo.elapsed() > interval * 3
+                };
+                if reached && !violation("keep-silent") && silent {
                     break;
+                }
+                let _ = tx.send(hb()).await;
+                if reached {
+                    unanswered += 1;
                 }
                 // The handshake timeout: no ack within 10 s, close and reopen.
                 if !reached && opened.elapsed() > Duration::from_secs(10) {
@@ -504,9 +524,13 @@ async fn one_stream(st: &Arc<State>, i: usize, attempt: u32) -> bool {
                         ticker = tokio::time::interval(interval);
                         ticker.tick().await;
                         last_echo = Instant::now();
+                        unanswered = 0;
                     }
                     Some(S::Heartbeat(_)) => {
-                        last_echo = Instant::now();
+                        if reached {
+                            last_echo = Instant::now();
+                            unanswered = 0;
+                        }
                         conn.echoed.store(true, Ordering::SeqCst);
                     }
                     Some(S::Request(r)) => {
@@ -603,7 +627,33 @@ async fn handle(st: Arc<State>, i: usize, generation: u64, r: Request) {
     let p = wire::json(&r.payload);
     let id = r.id.clone();
     let mode = r.mode;
-    let msg = if mode == RequestMode::Subscription as i32 {
+    // The caller's token first, for every request (only for conformance.Guarded with
+    // `token-after-lookup`).
+    let refused = if violation("token-after-lookup") {
+        None
+    } else {
+        caller(&st, &r).await.err()
+    };
+    let msg = if let Some(why) = refused {
+        let error = Error {
+            request_id: id.clone(),
+            code: 5,
+            message: why,
+            details: vec![],
+        };
+        Some(if mode == RequestMode::Unary as i32 {
+            client_message::Message::Reply(Reply {
+                request_id: id.clone(),
+                result: Some(reply::Result::Error(error)),
+            })
+        } else {
+            client_message::Message::End(ReplyEnd {
+                request_id: id.clone(),
+                error: Some(error),
+                ..ReplyEnd::default()
+            })
+        })
+    } else if mode == RequestMode::Subscription as i32 {
         let mut subs = st.subs.lock().unwrap();
         if subs.len() >= st.max_subs && !violation("no-subscription-limit") {
             Some(client_message::Message::End(ReplyEnd {
@@ -858,31 +908,61 @@ async fn unary(st: &Arc<State>, r: &Request, p: &Value) -> client_message::Messa
     }
 }
 
-/// Reads the caller's token without checking its signature (the only mode it serves:
-/// `no-signature-check`): no token, not a JWT, expired → UNAUTHENTICATED.
-async fn guarded(st: &State, r: &Request, p: &Value) -> client_message::Message {
-    let id = r.id.as_str();
-    // Verified against the JWKS (RS256, the key of its kid, the issuer, the expiry), except with
-    // `no-signature-check`, which only reads the claims below.
-    if !violation("no-signature-check") {
-        let token = r
-            .headers
-            .get("authorization")
-            .and_then(|a| a.strip_prefix("Bearer "))
-            .unwrap_or_default()
-            .to_string();
-        let cached = st.jwks.lock().unwrap().clone();
-        let jwks = match cached {
-            Some(j) => j,
-            None => {
-                let fetched = http(&var("CONFORMANCE_JWKS_URL").unwrap_or_default(), None)
-                    .await
-                    .unwrap_or(Value::Null);
-                *st.jwks.lock().unwrap() = Some(fetched.clone());
-                fetched
-            }
-        };
-        let verified = jsonwebtoken::decode_header(&token).ok().and_then(|h| {
+/// The caller of `r`: none without a token or without a JWKS, its claims when the token is
+/// verified against the JWKS (RS256, the key of its kid, the issuer, the expiry), an error for a
+/// header that is not `Bearer <token>`, a token that is not a signed compact JWS, or one that
+/// does not verify. With `no-signature-check` the claims are read without checking the
+/// signature (the expiry still counts).
+async fn caller(st: &State, r: &Request) -> Result<Option<Value>, String> {
+    let Some(header) = r
+        .headers
+        .get("authorization")
+        .filter(|h| !h.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let token = match header.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("bearer ") => header[7..].trim(),
+        _ => return Err("malformed authorization header".into()),
+    };
+    let segments: Vec<&str> = token.split('.').collect();
+    let part = |s: &str| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(s)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .filter(Value::is_object)
+    };
+    if segments.len() != 3 {
+        return Err("unreadable token".into());
+    }
+    let (Some(head), Some(claims)) = (part(segments[0]), part(segments[1])) else {
+        return Err("unreadable token".into());
+    };
+    if head["alg"] == "none" || segments[2].is_empty() {
+        return Err("unsigned token".into());
+    }
+    let Some(jwks_url) = var("CONFORMANCE_JWKS_URL") else {
+        return Ok(None);
+    };
+    if violation("no-signature-check") {
+        if claims["exp"].as_i64().unwrap_or(0) < now_ms() / 1000 {
+            return Err("token expired".into());
+        }
+        return Ok(Some(claims));
+    }
+    let cached = st.jwks.lock().unwrap().clone();
+    let jwks = match cached {
+        Some(j) => j,
+        None => {
+            let fetched = http(&jwks_url, None).await.unwrap_or(Value::Null);
+            *st.jwks.lock().unwrap() = Some(fetched.clone());
+            fetched
+        }
+    };
+    jsonwebtoken::decode_header(token)
+        .ok()
+        .and_then(|h| {
             let jwk = jwks["keys"]
                 .as_array()?
                 .iter()
@@ -892,29 +972,20 @@ async fn guarded(st: &State, r: &Request, p: &Value) -> client_message::Message 
             let mut v = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
             v.set_issuer(&[var("CONFORMANCE_ISSUER").unwrap_or_default()]);
             v.validate_aud = false;
-            jsonwebtoken::decode::<Value>(&token, &key, &v).ok()
-        });
-        if verified.is_none() {
-            return reply_err(id, 5, "unauthenticated");
-        }
-    }
-    let claims = r
-        .headers
-        .get("authorization")
-        .and_then(|a| a.strip_prefix("Bearer "))
-        .and_then(|t| t.split('.').nth(1))
-        .and_then(|b| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(b)
-                .ok()
+            jsonwebtoken::decode::<Value>(token, &key, &v).ok()
         })
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    let Some(claims) = claims else {
-        return reply_err(id, 5, "unauthenticated");
+        .map(|t| Some(t.claims))
+        .ok_or_else(|| "unauthenticated".into())
+}
+
+/// `conformance.Guarded`: an authenticated caller (before decoding), not `conformance-refused`.
+async fn guarded(st: &State, r: &Request, p: &Value) -> client_message::Message {
+    let id = r.id.as_str();
+    let claims = match caller(st, r).await {
+        Ok(Some(claims)) => claims,
+        Ok(None) => return reply_err(id, 5, "unauthenticated"),
+        Err(why) => return reply_err(id, 5, &why),
     };
-    if claims["exp"].as_i64().unwrap_or(0) < now_ms() / 1000 {
-        return reply_err(id, 5, "token expired");
-    }
     if claims["sub"] == "conformance-refused" {
         return reply_err(id, 7, "access denied");
     }

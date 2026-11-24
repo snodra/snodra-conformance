@@ -346,6 +346,8 @@ pub struct Session {
     /// Whether the library ended the stream (rather than the fake hub).
     closed_by_client: AtomicBool,
     echo: AtomicBool,
+    /// When the fake hub last echoed a heartbeat (L1-SILENT-HUB counts from it).
+    last_echo: Mutex<Option<Instant>>,
     echo_before_ack: bool,
     ack: Mutex<RegisterAck>,
     acked: AtomicBool,
@@ -429,6 +431,11 @@ impl Session {
     /// Stops (or resumes) echoing heartbeats: a silent hub.
     pub fn set_echo(&self, on: bool) {
         self.echo.store(on, Ordering::SeqCst);
+    }
+
+    /// When the fake hub last echoed a heartbeat on this stream.
+    pub fn last_echo(&self) -> Option<Instant> {
+        *self.last_echo.lock().unwrap()
     }
 
     /// Ends the stream with `status`, as a hub closing it.
@@ -722,6 +729,7 @@ impl Hub for Service {
                 closed_at: Mutex::new(None),
                 closed_by_client: AtomicBool::new(false),
                 echo: AtomicBool::new(true),
+                last_echo: Mutex::new(None),
                 echo_before_ack: inner.echo_before_ack.load(Ordering::SeqCst),
                 ack: Mutex::new(inner.ack.lock().unwrap().clone()),
                 acked: AtomicBool::new(false),
@@ -797,6 +805,7 @@ impl Hub for Service {
                     Some(M::Heartbeat(h)) => {
                         let may = session.acked() || session.echo_before_ack;
                         if may && session.echo.load(Ordering::SeqCst) {
+                            *session.last_echo.lock().unwrap() = Some(Instant::now());
                             session.send(server_message::Message::Heartbeat(Heartbeat {
                                 sent_at_ms: h.sent_at_ms,
                             }));

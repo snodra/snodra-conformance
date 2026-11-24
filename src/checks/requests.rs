@@ -843,6 +843,12 @@ pub async fn handler_errors(run: Run) -> CheckResult {
         "NO_HANDLER",
         "a type the service does not serve",
     )?;
+    let wrong = wrong_modes(s).await;
+    ensure!(
+        wrong.is_empty(),
+        "requests in a mode the handler does not serve (protocol.md, Handling a request): {}",
+        wrong.join("; ")
+    );
     s.command("conformance.Echo", json!({}))
         .await
         .or_fail("an Echo after the failures")?;
@@ -850,7 +856,206 @@ pub async fn handler_errors(run: Run) -> CheckResult {
         rig.fake.sessions().len() == 1 && !s.is_closed(),
         "the stream was dropped during the failures"
     );
-    Ok("HANDLER_ERROR (nested NO_HANDLER too), INVALID_REQUEST (payload, mode), NO_HANDLER, on one live stream".into())
+    Ok("HANDLER_ERROR (nested NO_HANDLER too), INVALID_REQUEST (payload, mode), NO_HANDLER, the table of wrong modes \
+        (a Reply for a unary request, a ReplyEnd without parts otherwise), on one live stream".into())
+}
+
+/// The table of protocol.md ("A request in a mode its handler does not serve"): every request
+/// below goes to a handler (or a type) that does not serve its mode, and gets one terminal frame
+/// with the table's code: a `Reply` for a unary request, a `ReplyEnd` with no part for a streaming
+/// or subscription request. The answers that differ, described.
+async fn wrong_modes(s: &Session) -> Vec<String> {
+    use crate::proto::ErrorCode as C;
+    const UNARY: RequestMode = RequestMode::Unary;
+    const STREAMING: RequestMode = RequestMode::Streaming;
+    const SUBSCRIPTION: RequestMode = RequestMode::Subscription;
+    let (command, query) = (RequestKind::Command, RequestKind::Query);
+    // (what, type, mode, kind, expected code)
+    let cases = [
+        (
+            "a query to a command handler",
+            "conformance.Echo",
+            UNARY,
+            query,
+            C::NoHandler,
+        ),
+        (
+            "a stream of a command type",
+            "conformance.Echo",
+            STREAMING,
+            query,
+            C::NoHandler,
+        ),
+        (
+            "a subscription of a command type",
+            "conformance.Echo",
+            SUBSCRIPTION,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a command to a query handler",
+            "conformance.EchoQuery",
+            UNARY,
+            command,
+            C::NoHandler,
+        ),
+        (
+            "a stream to a query handler",
+            "conformance.EchoQuery",
+            STREAMING,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a subscription to a query handler",
+            "conformance.EchoQuery",
+            SUBSCRIPTION,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a command to a streaming handler",
+            "conformance.Stream",
+            UNARY,
+            command,
+            C::NoHandler,
+        ),
+        (
+            "a subscription to a streaming handler",
+            "conformance.Stream",
+            SUBSCRIPTION,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a command to a subscription handler",
+            "conformance.Watch",
+            UNARY,
+            command,
+            C::NoHandler,
+        ),
+        (
+            "a stream to a subscription handler",
+            "conformance.Watch",
+            STREAMING,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a stream of a type not served",
+            "conformance.NotServed",
+            STREAMING,
+            query,
+            C::NoHandler,
+        ),
+        (
+            "a subscription of a type not served",
+            "conformance.NotServed",
+            SUBSCRIPTION,
+            query,
+            C::InvalidRequest,
+        ),
+        (
+            "a unary request of an unspecified kind",
+            "conformance.Echo",
+            UNARY,
+            RequestKind::Unspecified,
+            C::InvalidRequest,
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (n, (what, type_name, mode, kind, code)) in cases.into_iter().enumerate() {
+        // A streaming or subscription request is forwarded as `<id>#<n>`, a unary one as sent.
+        let id = if mode == UNARY {
+            format!("wrong-mode-{n}")
+        } else {
+            format!("wrong-mode-{n}#1")
+        };
+        let mut r = wire::request_mode(
+            &id,
+            type_name,
+            &json!({ "topic": "x", "count": 1 }),
+            mode,
+            1,
+        );
+        r.kind = kind as i32;
+        s.request(r);
+        let got = s
+            .until(Duration::from_secs(5), || {
+                let reply = s.select(|m| match &m.message {
+                    Some(M::Reply(r)) if r.request_id == id => Some(r.clone()),
+                    _ => None,
+                });
+                let end = s.ends(&id);
+                (!reply.is_empty() || !end.is_empty()).then_some((reply, end))
+            })
+            .await;
+        let Some((replies, ends)) = got else {
+            wrong.push(format!("{what} ({type_name}): no answer in 5 s"));
+            continue;
+        };
+        // Let a second terminal frame or a part show.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let parts = s.parts(&id).len();
+        let answer = if mode == UNARY {
+            match (replies.as_slice(), ends.is_empty()) {
+                ([(_, r)], true) => match &r.result {
+                    Some(reply::Result::Error(e)) => Some(e.code),
+                    _ => None,
+                },
+                _ => None,
+            }
+        } else {
+            match (ends.as_slice(), replies.is_empty(), parts) {
+                ([e], true, 0) if e.parts == 0 => e.error.as_ref().map(|e| e.code),
+                _ => None,
+            }
+        };
+        if answer != Some(code as i32) {
+            wrong.push(format!(
+                "{what} ({type_name}, mode {}): {} (expected {} {})",
+                wire::mode_name(mode as i32),
+                describe_terminal(s, &id),
+                if mode == UNARY {
+                    "a Reply with"
+                } else {
+                    "a ReplyEnd without parts, with"
+                },
+                wire::code_name(code as i32)
+            ));
+        }
+    }
+    wrong
+}
+
+/// Every terminal frame and part the library sent for `id`, in short.
+fn describe_terminal(s: &Session, id: &str) -> String {
+    let frames: Vec<String> = s
+        .select(|m| match &m.message {
+            Some(M::Reply(r)) if r.request_id == id => Some(match &r.result {
+                Some(reply::Result::Error(e)) => format!("Reply {}", wire::code_name(e.code)),
+                _ => "Reply with a payload".to_string(),
+            }),
+            Some(M::Part(p)) if p.request_id == id => Some(format!("ReplyPart {}", p.seq)),
+            Some(M::End(e)) if e.request_id == id => Some(format!(
+                "ReplyEnd parts {} {}",
+                e.parts,
+                e.error
+                    .as_ref()
+                    .map(|e| wire::code_name(e.code))
+                    .unwrap_or_else(|| "without error".into())
+            )),
+            _ => None,
+        })
+        .into_iter()
+        .map(|(_, d)| d)
+        .collect();
+    if frames.is_empty() {
+        "nothing".into()
+    } else {
+        frames.join(", ")
+    }
 }
 
 /// A `conformance.Guarded` request with `authorization` (when given).
@@ -953,8 +1158,120 @@ pub async fn identity(run: Run) -> CheckResult {
             );
         }
     }
+    // messages.md, Forwarded identity: every request's token is checked first, before the handler
+    // is looked up, also for a handler that needs no caller and for a type the instance does not
+    // serve; a header that is not `Bearer <token>` fails, and the scheme matches in any letter case.
+    let token_first: [(&str, &str, &str, Value, &str); 6] = [
+        (
+            "a handler that needs no caller, with a token that is not a JWT",
+            "conformance.Echo",
+            "Bearer not-a-token",
+            json!({}),
+            "UNAUTHENTICATED",
+        ),
+        (
+            "a handler that needs no caller, with an expired token",
+            "conformance.Echo",
+            &expired,
+            json!({}),
+            "UNAUTHENTICATED",
+        ),
+        (
+            "a type the service does not serve, with an expired token",
+            "conformance.NotServed",
+            &expired,
+            json!({}),
+            "UNAUTHENTICATED",
+        ),
+        (
+            "a handler that needs no caller, with an authorization header that is not Bearer",
+            "conformance.Echo",
+            "Basic Y29uZm9ybWFuY2U6c2VjcmV0",
+            json!({}),
+            "UNAUTHENTICATED",
+        ),
+        (
+            "a handler that needs no caller, with a valid token",
+            "conformance.Echo",
+            &alice,
+            json!({}),
+            "OK",
+        ),
+        (
+            "the Bearer scheme in lower case and a valid token",
+            "conformance.Guarded",
+            &alice.replacen("Bearer", "bearer", 1),
+            good.clone(),
+            "OK",
+        ),
+    ];
+    for (what, type_name, auth, payload, expected) in token_first {
+        let r = wire::with_headers(
+            wire::request(&wire::new_id(), RequestKind::Command, type_name, &payload),
+            &[("authorization", auth)],
+        );
+        let r = s.call_request(r, Duration::from_secs(10)).await;
+        ensure!(
+            r.as_ref().map_or_else(|e| e.code.as_str(), |_| "OK") == expected,
+            "{what} ({type_name}): {} (expected {expected}: the token is checked first, for every request)",
+            match &r {
+                Ok(v) => format!("answered {v}"),
+                Err(e) => e.to_string(),
+            }
+        );
+    }
+    // Without a JWKS no token is verified, but a token that is not a signed compact JWS, or a
+    // header that is not `Bearer <token>`, still fails; a signed token is only carried on.
+    let plain = run.on_fake(|_| {}).await?;
+    let unsigned = format!(
+        "Bearer {}.{}.",
+        base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            br#"{"alg":"none","typ":"JWT"}"#
+        ),
+        base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            br#"{"sub":"alice"}"#
+        )
+    );
+    let without_jwks: [(&str, &str, &str); 4] = [
+        (
+            "a token that is not a JWT",
+            "Bearer not-a-token",
+            "UNAUTHENTICATED",
+        ),
+        ("an unsigned token (alg none)", &unsigned, "UNAUTHENTICATED"),
+        (
+            "an authorization header that is not Bearer",
+            "Basic Y29uZm9ybWFuY2U6c2VjcmV0",
+            "UNAUTHENTICATED",
+        ),
+        ("a signed token", &alice, "OK"),
+    ];
+    for (what, auth, expected) in without_jwks {
+        let r = wire::with_headers(
+            wire::request(
+                &wire::new_id(),
+                RequestKind::Command,
+                "conformance.Echo",
+                &json!({}),
+            ),
+            &[("authorization", auth)],
+        );
+        let r = plain.session.call_request(r, Duration::from_secs(10)).await;
+        ensure!(
+            r.as_ref().map_or_else(|e| e.code.as_str(), |_| "OK") == expected,
+            "without a JWKS, conformance.Echo with {what}: {} (expected {expected})",
+            match &r {
+                Ok(v) => format!("answered {v}"),
+                Err(e) => e.to_string(),
+            }
+        );
+    }
     Ok("UNAUTHENTICATED without a token, with a non-JWT, expired, foreign-key and other-issuer tokens \
-        (before decoding); PERMISSION_DENIED for a refused caller; a valid token answered".into())
+        (before decoding); PERMISSION_DENIED for a refused caller; a valid token answered; the token checked \
+        first for a handler that needs no caller and a type not served; without a JWKS a malformed or \
+        unsigned token refused, a signed one carried on".into())
 }
 
 /// Whether `v` is a W3C traceparent (`00-<32 hex>-<16 hex>-<2 hex>`, ids not all zero).

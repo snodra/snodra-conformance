@@ -396,28 +396,41 @@ pub async fn silent_hub(run: Run) -> CheckResult {
     let s0 = run.registered(&sut, &fake, 0).await?;
     tokio::time::sleep(Duration::from_millis(2 * INTERVAL)).await;
     s0.set_echo(false);
-    let silent_at = Instant::now();
     let closed = up(
         &sut,
         "the service kept a stream without echoes for 15 s (interval 1000 ms)",
         s0.closed(Duration::from_secs(15)),
     )
     .await?;
-    let after = ms(closed - silent_at);
-    // protocol.md: "drop a stream that brought no echo for three heartbeat intervals". The last
-    // echo came up to one interval before the silence began; 2 s of tolerance above.
     ensure!(
-        s0.closed_by_client() && (2 * INTERVAL..=3 * INTERVAL + 2000).contains(&after),
-        "with heartbeat_interval_ms {INTERVAL} the silent stream was dropped after {after} ms by {} (expected about three intervals, by the library)",
-        if s0.closed_by_client() {
-            "the library"
-        } else {
-            "the hub"
-        }
+        s0.closed_by_client(),
+        "with heartbeat_interval_ms {INTERVAL} the silent stream was closed by the hub, not dropped by the library"
+    );
+    // protocol.md: on a heartbeat tick after the ack, the hub is silent when more than three
+    // intervals passed since its last echo and the three heartbeats written since it are
+    // unanswered: the drop comes between three and four intervals after the last echo. The
+    // echo left the fake hub before the library read it, so nothing is subtracted below; 750 ms
+    // above for scheduling.
+    let last = s0
+        .last_echo()
+        .or_fail("the fake hub never echoed a heartbeat")?;
+    let after = ms(closed.saturating_duration_since(last));
+    let unanswered = s0
+        .select(|m| match &m.message {
+            Some(M::Heartbeat(_)) => Some(()),
+            _ => None,
+        })
+        .iter()
+        .filter(|(t, _)| *t > last)
+        .count();
+    ensure!(
+        (3 * INTERVAL..=4 * INTERVAL + 750).contains(&after) && unanswered >= 3,
+        "with heartbeat_interval_ms {INTERVAL} the silent stream was dropped {after} ms after the last echo, \
+         with {unanswered} heartbeats unanswered (expected between three and four intervals, after three unanswered heartbeats)"
     );
     run.registered(&sut, &fake, 1).await?;
     Ok(format!(
-        "silent stream dropped {after} ms after the echoes stopped, then reconnected"
+        "silent stream dropped {after} ms after the last echo, {unanswered} heartbeats unanswered, then reconnected"
     ))
 }
 

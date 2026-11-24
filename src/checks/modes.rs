@@ -459,6 +459,25 @@ pub async fn stream(run: Run) -> CheckResult {
 pub async fn subscribe(run: Run) -> CheckResult {
     let rig = run.on_fake(|spec| spec.max_subscriptions = Some(2)).await?;
     let s = Arc::clone(&rig.session);
+    // protocol.md, Subscription types: the Register declares the instance's subscription types
+    // (conformance.Watch only) in Register.subscription_query_types, each also a query type.
+    let register = s
+        .register(Duration::ZERO)
+        .await
+        .or_fail("runner bug: a registered session without its Register")?;
+    let queries: HashSet<&String> = register
+        .query_types
+        .iter()
+        .chain(&register.shared_query_types)
+        .collect();
+    ensure!(
+        register.subscription_query_types == ["conformance.Watch"]
+            && queries.contains(&"conformance.Watch".to_string()),
+        "the Register declares subscription types {:?} and query types {:?} (expected \
+         Register.subscription_query_types [\"conformance.Watch\"], also a query type)",
+        register.subscription_query_types,
+        queries
+    );
     let watch = |id: &str, topic: &str| {
         s.request(wire::request_mode(
             id,
@@ -612,7 +631,7 @@ pub async fn subscribe(run: Run) -> CheckResult {
         );
     }
     Ok(format!(
-        "handler: updates after the initial result kept, ReplyEnd on completion, removed on Cancel, RESOURCE_EXHAUSTED beyond the limit; sender: initial + 5 updates with {refilled} credits refilled, gap and short end fail it"
+        "the Register declares conformance.Watch a subscription type; handler: updates after the initial result kept, ReplyEnd on completion, removed on Cancel, RESOURCE_EXHAUSTED beyond the limit; sender: initial + 5 updates with {refilled} credits refilled, gap and short end fail it"
     ))
 }
 

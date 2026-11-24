@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "conformance.Watch.json",
   "title": "conformance.Watch",
-  "description": "A subscription query by topic: the initial result {topic, value 0, instanceId}; updates {topic, value} come from conformance.Emit.",
+  "description": "A subscription query by topic: the initial result {topic, value 0, instanceId}; updates {topic, value} come from conformance.Emit. Also declared in Register.subscription_query_types.",
   "x-snodra": {
     "conformanceVersion": 1,
     "kind": "query",

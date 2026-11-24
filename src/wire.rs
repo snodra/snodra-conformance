@@ -64,6 +64,14 @@ pub fn code_name(code: i32) -> String {
     }
 }
 
+/// The name of a `RequestMode` value (`UNKNOWN(<n>)` for one hub.proto does not define).
+pub fn mode_name(mode: i32) -> String {
+    match RequestMode::try_from(mode) {
+        Ok(m) => m.as_str_name().to_string(),
+        Err(_) => format!("UNKNOWN({mode})"),
+    }
+}
+
 /// An error the runner received: its code, message and details (as text).
 #[derive(Clone, Debug, PartialEq)]
 pub struct WireError {
