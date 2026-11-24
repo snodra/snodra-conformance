@@ -2,9 +2,9 @@
 
 This page is for anyone writing a Snodra library and for the conformance runner's maintainers: it specifies the
 **conformance service** a library under test runs, the fixed `conformance.*` message types it handles, and how the
-runner, `snodra-conformance`, proves each check of [feature level 1](https://snodra.damoreira.com/library-authors/feature-levels/#level-1-core)
+runner, `snodra-conformance`, proves each check of [feature level 1](https://snodra.damoreira.com/docs/library-authors/feature-levels/#level-1-core)
 with them. After reading it you can write the conformance service for your library and know what every check does to
-it. How to run the runner and read its report is in [the conformance page](https://snodra.damoreira.com/library-authors/conformance/).
+it. How to run the runner and read its report is in [the conformance page](https://snodra.damoreira.com/docs/library-authors/conformance/).
 
 The JSON Schema of every message type (its payload, its answer, and for a stream or a subscription its items) is in
 `contract/`, one file per type, named after the type (for example
@@ -39,7 +39,7 @@ Each check connects the instance to one of:
   forwarding within the library's permits and queueing the rest, later and empty `Register`s, `NO_HANDLER` for a type
   nobody serves, no `Cancel` for a command). It forwards requests snodra-server would refuse, such as a request of a
   subscription type in another mode, so the library's own answer is checked; the remaining differences are listed in
-  [the conformance page](https://snodra.damoreira.com/library-authors/conformance/#how-the-runners-hub-differs-from-snodra-server), and
+  [the conformance page](https://snodra.damoreira.com/docs/library-authors/conformance/#how-the-runners-hub-differs-from-snodra-server), and
   the runner's tests run one script of frames against both to keep them equal.
 
 The runner drives the library in two directions. As a **sender** it sends the service's `conformance.*` types and reads
@@ -72,7 +72,7 @@ the runner stops every instance that way, and its pre-flight ends the run when t
 The service registers every type of [the next section](#the-services-types) at start, with one exception:
 `conformance.Guarded` is registered only when `CONFORMANCE_JWKS_URL` is set. A handler that requires an authenticated
 caller needs a JWKS to verify the caller's token, and a library refuses to start one without it
-([messages.md, Forwarded identity](https://snodra.damoreira.com/library-authors/messages/#forwarded-identity)). Without
+([messages.md, Forwarded identity](https://snodra.damoreira.com/docs/library-authors/messages/#forwarded-identity)). Without
 a JWKS the service serves no `conformance.Guarded`, so a request of it gets `NO_HANDLER`.
 
 The service has no event handler, no event store and no message store, writes its logs to standard output or standard
@@ -164,7 +164,7 @@ decoded `payload` (unary), the `items` and how they `end`ed (`completed`, `stopp
 |---|---|
 | `never-sent` | the request was never handed to a stream's transport: no acknowledged stream, or still in the library's own buffer when the stream broke |
 | `outcome-unknown` | handed to the transport, then the hub stream broke before the answer; also a stream or a subscription the library sent whose hub stream was lost |
-| `code` | an `ErrorCode` reached the caller, from the hub or a handler; the library's local guard timeout is `TIMEOUT` here too ([the protocol page](https://snodra.damoreira.com/library-authors/protocol/) lists the sender's local guard among the producers of `ErrorCode.TIMEOUT`). `error.code` its name, `error.message`, `error.details` (UTF-8 text) as the caller sees them |
+| `code` | an `ErrorCode` reached the caller, from the hub or a handler; the library's local guard timeout is `TIMEOUT` here too ([the protocol page](https://snodra.damoreira.com/docs/library-authors/protocol/) lists the sender's local guard among the producers of `ErrorCode.TIMEOUT`). `error.code` its name, `error.message`, `error.details` (UTF-8 text) as the caller sees them |
 | `lost-parts` | the library detected lost parts: a gap in `ReplyPart.seq`, or a `ReplyEnd.parts` above the parts received |
 | `refused` | the library refused the call before sending it (a header it owns, ...) |
 | `local` | any other local failure |
@@ -176,7 +176,7 @@ library reports lost parts and a refused header as one error variant, `Messaging
 
 By default a library answers a command, and a point query of a type that is not shared, in-process when the instance
 handles the type itself: nothing goes through the hub, and the routing key is ignored
-([protocol.md, Requests a service answers itself](https://snodra.damoreira.com/library-authors/protocol/#requests-a-service-answers-itself)).
+([protocol.md, Requests a service answers itself](https://snodra.damoreira.com/docs/library-authors/protocol/#requests-a-service-answers-itself)).
 So a unary `conformance.Send` to `echo` or `echo-query` never reaches the hub unless the service turns on its library's
 "always route through the hub" setting. A scatter-gather, a stream, a subscription and a query of a shared type always
 go through the hub.
@@ -192,7 +192,7 @@ hub answers them itself, and the harness reports them as not exercised (its `LOC
 ## How each check is proved
 
 "Fake" is a fake hub, "hub" the real one. The runner's checks are the ids of
-[feature levels](https://snodra.damoreira.com/library-authors/feature-levels/#level-1-core); each is independent and bounded in time. Every
+[feature levels](https://snodra.damoreira.com/docs/library-authors/feature-levels/#level-1-core); each is independent and bounded in time. Every
 time bound comes from the rule the check proves, with a tolerance for scheduling; none from the reference's speed.
 
 | Id | Where | What the runner does and expects |
@@ -206,15 +206,15 @@ time bound comes from the rule the check proves, with a tolerance for scheduling
 | `L1-RECONNECT` | fake | a restart answering `UNAVAILABLE` for 8 s (at least two attempts, waits at most 5.6 s, fewer than 20 attempts: no tight loop), then a process gone (TCP refused) for 8 s: each time registered again within 12 s with the identical `Register` |
 | `L1-UNARY` | hub | two instances: `conformance.Echo`, `conformance.EchoQuery` (payload and header back), `conformance.Done` answers `{}`, one routing key reaches one instance; `conformance.Send` of a command (with a routing key, seen by the runner's instance) and of a query come back decoded, `{}` too |
 | `L1-REQUEST-ID` | fake | 15 sends, 10 pending at once: 15 distinct, non-empty ids |
-| `L1-TIMEOUT` | fake | `RegisterAck.max_timeout_ms` 2000, a type override of 1500, the runner silent: `Request.timeout_ms` is 0 without a caller timeout and the caller's 1200 with one; the library gives up after the bound of [the protocol page](https://snodra.damoreira.com/library-authors/protocol/) (2000, 1500, 1200) plus 1 s, not 150 ms earlier, not 2.5 s later |
+| `L1-TIMEOUT` | fake | `RegisterAck.max_timeout_ms` 2000, a type override of 1500, the runner silent: `Request.timeout_ms` is 0 without a caller timeout and the caller's 1200 with one; the library gives up after the bound of [the protocol page](https://snodra.damoreira.com/docs/library-authors/protocol/) (2000, 1500, 1200) plus 1 s, not 150 ms earlier, not 2.5 s later |
 | `L1-ERRORS` | fake | `ServerMessage.error` with every `ErrorCode`, 0 and 42: each its own code, 0 and 42 as `HANDLER_ERROR`; a handler's `HANDLER_ERROR`, `UNAUTHENTICATED`, `PERMISSION_DENIED`, `INVALID_REQUEST` keep their message, `HANDLER_ERROR` its details |
 | `L1-NEVER-SENT` | fake | before any ack: `never-sent`; a request the fake takes and answers by closing the stream: `outcome-unknown` |
 | `L1-RETRY` | fake | with `CONFORMANCE_RETRY_*` (3 attempts): after `NO_HANDLER` a second attempt with a fresh id and the remaining budget (`Request.timeout_ms` > 0, below the caller's 5000; also > 0 without a caller timeout); one attempt only after `TIMEOUT`, `HANDLER_DISCONNECTED` and a stream broken after the write. Skipped when `conformance.View.retry` is false |
 | `L1-ARRIVAL-STREAM` | fake | two hubs: a reply and a stream's parts and end go on the stream the request came from; the answer to a request whose stream was lost appears on no other stream |
 | `L1-ONE-TERMINAL` | fake | one `Reply` for `<id>` and `<id>#<n>`, one `ReplyEnd` for a stream (`<id>#1`) and a completed subscription target, nothing for a stream or a scatter-gather target (`conformance.SleepQuery`) after the hub's `Cancel` (a later `Flow` included) |
-| `L1-HANDLER-ERRORS` | fake | `conformance.Fail`: `HANDLER_ERROR`, short message without a line break; `conformance.Relay` whose call gets `NO_HANDLER`: `HANDLER_ERROR`; a payload that does not decode, a payload that is not JSON, a unary request to a streaming handler and to a subscription handler (not `#0`): `INVALID_REQUEST`; a type not served: `NO_HANDLER`; every other cell of the table of [the protocol page](https://snodra.damoreira.com/library-authors/protocol/#handling-a-request) the service's types reach (a query to a command, a command to each kind of query handler, a stream and a subscription to each handler and to a type not served, a unary request of kind `REQUEST_KIND_UNSPECIFIED`): its code, in one `Reply` for a unary request and in one `ReplyEnd` without parts otherwise; the stream stays up |
+| `L1-HANDLER-ERRORS` | fake | `conformance.Fail`: `HANDLER_ERROR`, short message without a line break; `conformance.Relay` whose call gets `NO_HANDLER`: `HANDLER_ERROR`; a payload that does not decode, a payload that is not JSON, a unary request to a streaming handler and to a subscription handler (not `#0`): `INVALID_REQUEST`; a type not served: `NO_HANDLER`; every other cell of the table of [the protocol page](https://snodra.damoreira.com/docs/library-authors/protocol/#handling-a-request) the service's types reach (a query to a command, a command to each kind of query handler, a stream and a subscription to each handler and to a type not served, a unary request of kind `REQUEST_KIND_UNSPECIFIED`): its code, in one `Reply` for a unary request and in one `ReplyEnd` without parts otherwise; the stream stays up |
 | `L1-IDENTITY` | fake | `conformance.Guarded` with the runner's JWKS: no token, a non-JWT, an expired token, a token signed by a key the JWKS does not publish, one of another issuer: `UNAUTHENTICATED`; `conformance-refused`: `PERMISSION_DENIED`; no token and a bad payload: `UNAUTHENTICATED` (decided before decoding); a valid token and a bad payload: `INVALID_REQUEST`; a valid token: answered, also with the scheme written `bearer`. The token is checked before the handler lookup: `conformance.Echo` (no caller needed) with a non-JWT, an expired token or an `authorization` header that is not `Bearer <token>`, and a type not served with an expired token: `UNAUTHENTICATED`; `conformance.Echo` with a valid token: answered. A second instance without a JWKS: `conformance.Echo` with a non-JWT, an unsigned token (`alg` `none`) or a header that is not `Bearer <token>`: `UNAUTHENTICATED`; with a signed token: answered (the token is only carried on) |
-| `L1-PROPAGATION` | fake | `conformance.Relay` with `correlationId`, `authorization` and `traceparent`: the nested request carries the same correlation id and token and a traceparent of the same trace; without them it carries the handled `Request.id` as correlation id, no authorization, and a traceparent only if well formed; a `conformance.Send` setting `authorization`, `traceparent`, `tracestate`, `correlationId`, `correlation-id` (also in other letter cases) is `refused` and nothing is sent (the rule of the [messages page](https://snodra.damoreira.com/library-authors/messages/#request-headers)) |
+| `L1-PROPAGATION` | fake | `conformance.Relay` with `correlationId`, `authorization` and `traceparent`: the nested request carries the same correlation id and token and a traceparent of the same trace; without them it carries the handled `Request.id` as correlation id, no authorization, and a traceparent only if well formed; a `conformance.Send` setting `authorization`, `traceparent`, `tracestate`, `correlationId`, `correlation-id` (also in other letter cases) is `refused` and nothing is sent (the rule of the [messages page](https://snodra.damoreira.com/docs/library-authors/messages/#request-headers)) |
 | `L1-PERMITS` | fake | capacity 4 offers 4; capacity 1 (the fake forwards only with a permit): the permit comes back at once after each reply (median below 35 ms, against 50 ms batching); capacity 64, after 5 warm-up requests: each `Permits` for the 10 next completions carries 16 grants or leaves at least 40 ms after the earliest completion it covers (batched at 16 or 50 ms, 10 ms tolerance), and all 10 come back; on two hubs, permits go back to the arrival stream |
 | `L1-SHARED` | hub | the service and the runner own `conformance.SharedQuery` shared (topology: shared, both owners); point queries reach the service; a gather reaches both |
 | `L1-SCATTER` | hub, fake | the library's gather over two runner targets (one failing) returns both parts, `failed` 1; a gather on `conformance.EchoQuery` is answered by both instances; on a fake, a `conformance.SleepQuery` target `<id>#<n>` cancelled by the hub sends nothing more |
@@ -232,10 +232,10 @@ time bound comes from the rule the check proves, with a tolerance for scheduling
 | `L1-STATUS` | fake | two hubs: an `InstanceStatus` at least every 5 s (no two more than 6.5 s apart, and none missing for 6.5 s at the end of the observation; extra reports are allowed) on each stream, naming both hub ids and the two handlers running |
 
 What no check can observe from outside is listed in
-[the conformance page](https://snodra.damoreira.com/library-authors/conformance/#what-the-runner-checks).
+[the conformance page](https://snodra.damoreira.com/docs/library-authors/conformance/#what-the-runner-checks).
 
 ## Levels 2 to 4
 
 Levels 2 to 4 are proved by the event-store and message-store conformance kits that ship with both official libraries
-([feature levels](https://snodra.damoreira.com/library-authors/feature-levels/)): the runner checks level 1 only. The namespace
+([feature levels](https://snodra.damoreira.com/docs/library-authors/feature-levels/)): the runner checks level 1 only. The namespace
 `conformance.events.*` is reserved for a later runner version that checks events, processors and sagas from outside.

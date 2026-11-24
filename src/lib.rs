@@ -1,5 +1,5 @@
 //! `snodra-conformance`: proves a client library's feature level (the conformance contract,
-//! `docs/contract.md`; the Snodra docs: <https://snodra.damoreira.com/>).
+//! `docs/contract.md`; the Snodra docs: <https://snodra.damoreira.com/docs/>).
 //!
 //! The runner starts the library's conformance service once per check (`--service-cmd`, with the
 //! `CONFORMANCE_*` environment) and connects it to a real hub (`--hub`) or to fake hubs it runs

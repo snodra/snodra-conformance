@@ -5,7 +5,7 @@
 //! a command, a half-close) runs against a fake hub and against `snodra-server:dev` (Docker), and
 //! both must yield the same observable sequence. What the fake hub deliberately does differently
 //! is listed in the conformance page of the Snodra docs
-//! (<https://snodra.damoreira.com/library-authors/conformance/>).
+//! (<https://snodra.damoreira.com/docs/library-authors/conformance/>).
 
 mod support;
 

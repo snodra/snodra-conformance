@@ -1,5 +1,5 @@
 //! The level-1 checks, one function per id of the Snodra feature levels
-//! (<https://snodra.damoreira.com/library-authors/feature-levels/>).
+//! (<https://snodra.damoreira.com/docs/library-authors/feature-levels/>).
 //!
 //! Every check starts its own instances of the service under test (fresh processes, fresh
 //! instance ids), its own fake hubs, and is bounded in time; nothing is shared between checks
