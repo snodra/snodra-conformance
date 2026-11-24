@@ -1,6 +1,6 @@
 [package]
 name = "snodra-conformance"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.99"
 description = "The Snodra conformance runner: proves a client library's feature level against a real Snodra Server and fake hubs"
