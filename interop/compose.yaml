@@ -10,7 +10,7 @@ x-service: &service
 
 services:
   hub:
-    image: snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.5.4}
+    image: snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.6.0}
     # The driver, on the host, talks to the hub here. On macOS port 7000 is held by the AirPlay
     # Receiver: set SNODRA_HUB_PORT (for example 17000).
     ports:
@@ -20,11 +20,10 @@ services:
     <<: *service
     build:
       context: images/go
-      # The Go service is built from a pinned commit of snodra-messaging-go (there is no release
-      # tag yet). To change at release: replace the commit after `#` with the tag, `v0.1.0`.
+      # snodra-messaging-go's tag v0.1.0 carries examples/conformance-service.
       # GO_REF overrides the ref (for example GO_REF=main); GO_SRC names a local checkout instead.
       additional_contexts:
-        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-0e6c9071c4222a6206aae39d43e650ceeadeddb8}}
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.1.0}}
     environment:
       CONFORMANCE_SERVICE_NAME: conformance-interop
       CONFORMANCE_INSTANCE_ID: go
@@ -46,11 +45,11 @@ services:
     <<: *service
     build:
       context: images/kotlin
-      # snodra-messaging's tag v0.5.1 carries examples/conformance-service (the Kotlin library
+      # snodra-messaging's tag v0.6.0 carries examples/conformance-service (the Kotlin library
       # publishes no conformance service artifact, so the harness builds it from the tag).
       # KOTLIN_REF overrides the ref; KOTLIN_SRC names a local checkout instead.
       additional_contexts:
-        kotlinsrc: ${KOTLIN_SRC:-https://github.com/snodra/snodra-messaging.git#${KOTLIN_REF:-v0.5.1}}
+        kotlinsrc: ${KOTLIN_SRC:-https://github.com/snodra/snodra-messaging.git#${KOTLIN_REF:-v0.6.0}}
     environment:
       CONFORMANCE_SERVICE_NAME: conformance-interop
       CONFORMANCE_INSTANCE_ID: kotlin

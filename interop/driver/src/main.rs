@@ -37,9 +37,10 @@ struct Args {
     strict: bool,
 }
 
-/// The caller's token for the relay: a JWT-shaped, unsigned-in-effect token. Every library reads
-/// the `authorization` header it is handed and answers `UNAUTHENTICATED` for a value that is not
-/// a JWT, whether or not the handler asks for a caller, so the value cannot be free text.
+/// The caller's token for the relay: a signed compact JWT that no service can verify (none has a
+/// JWKS), so every service only carries it on. Every library reads the `authorization` header it
+/// is handed and answers `UNAUTHENTICATED` for a value that is not a signed compact JWT, whether
+/// or not the handler asks for a caller, so the value cannot be free text.
 fn authorization() -> String {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD as b64;

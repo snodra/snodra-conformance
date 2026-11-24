@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # The Go conformance service of snodra-messaging-go (examples/conformance-service).
-# The source arrives as the named build context `gosrc` (compose.yaml): a pinned commit of
+# The source arrives as the named build context `gosrc` (compose.yaml): a pinned tag of
 # https://github.com/snodra/snodra-messaging-go, or a local checkout (GO_SRC).
 FROM golang:1.26-bookworm AS build
 WORKDIR /src

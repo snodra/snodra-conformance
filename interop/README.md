@@ -12,7 +12,7 @@ SNODRA_HUB_PORT=17000 interop/run.sh            # macOS: the AirPlay Receiver ho
 ```
 
 It needs Docker with compose (it builds three images and starts the hub image
-`snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.5.4}`) and a Rust toolchain for the driver. It prints one
+`snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.6.0}`) and a Rust toolchain for the driver. It prints one
 line per exchange and stops everything it started.
 
 **Read the summary line, not only the exit code.** Every exchange that runs must pass, but some required
@@ -33,12 +33,11 @@ not-exercised exchange into a failure with a non-zero exit. Two runs on one host
 | Image | Built from |
 |---|---|
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging-rs` release pinned in `Cargo.lock` |
-| `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.5.1`) |
-| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at `GO_REF` |
+| `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.0`) |
+| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.1.0`) |
 
-`GO_REF` defaults to a pinned commit: the Go library has no release tag yet. **Change that default
-in `compose.yaml` (the line marked "To change at release") to the release tag.** `GO_SRC` and
-`KOTLIN_SRC` name a local checkout instead of a ref (`GO_SRC=~/src/snodra-messaging-go interop/run.sh`).
+`GO_SRC` and `KOTLIN_SRC` name a local checkout instead of a ref
+(`GO_SRC=~/src/snodra-messaging-go interop/run.sh`).
 
 ## What is asserted
 
@@ -65,8 +64,9 @@ in `compose.yaml` (the line marked "To change at release") to the release tag.**
    once every instance reports serving the subscription (`conformance.View`).
 7. From every X: `conformance.Relay` (keyed to X) sends to the driver's own `conformance.runner.Probe` from
    inside the handler; the probe saw the same payload, correlation id, `authorization` and a `traceparent`
-   of the run's trace. The token is JWT-shaped (all three libraries answer `UNAUTHENTICATED` for a
-   `Bearer` value that is not a JWT, even for a handler that needs no caller).
+   of the run's trace. The token is a signed compact JWT that no service can verify: without a JWKS a
+   service only carries it on, and every library answers `UNAUTHENTICATED` for a `Bearer` value that is
+   not one, even for a handler that needs no caller.
 
 ## Known limits
 

@@ -3,7 +3,7 @@
 #
 #   LANGUAGES=go,rust,kotlin interop/run.sh
 #
-# Environment: LANGUAGES (default go,rust,kotlin), SNODRA_SERVER_VERSION (hub image, default 0.5.4),
+# Environment: LANGUAGES (default go,rust,kotlin), SNODRA_SERVER_VERSION (hub image, default 0.6.0),
 # SNODRA_HUB_PORT (the hub's host port, default 7000; use 17000 on macOS, where the AirPlay
 # Receiver holds 7000), INTEROP_PROJECT (the compose project name; default snodra-interop-<pid>, so two
 # runs on one host do not stop each other, but two runs need two SNODRA_HUB_PORT values),
