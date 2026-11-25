@@ -103,8 +103,9 @@ error (the runner keeps them per instance), and stops on SIGTERM within 5 s. It 
 `conformance.View.lastRejection` may come from any means the library offers to expose a refusal: an API, or its log.
 The official libraries expose it through an API: Kotlin `com.damoreira.snodra.messaging.hub.HubConnections.latestRejection`
 (read by the Kotlin conformance service), Rust `snodra_messaging::SnodraMessaging::latest_rejection()` (read by the
-reference service of this repository, `reference-service/`) and Go `snodra.App.Rejection()` (read by the Go conformance
-service). A library that exposes refusals nowhere fails `L1-REJECTION`.
+reference service of this repository, `reference-service/`), Go `snodra.App.Rejection()` (read by the Go conformance
+service) and Python `snodra.App.rejection` (read by the Python conformance service). A library that exposes refusals
+nowhere fails `L1-REJECTION`.
 
 Everything else is the library's own behaviour: the conformance service writes these handlers the way an application
 would, with the library's API, and never works around the library (no hand-written frames, no error mapping of its
@@ -184,10 +185,10 @@ go through the hub.
 No level-1 check sends to the service's own types: the checks send only to the runner's types, which the service never
 handles, so the setting changes no verdict. The interoperability harness (`interop/`) does send to them, to make one
 language call another through the hub. A conformance service should therefore turn the setting on, or let it be
-turned on through its environment. The reference service and the Go conformance service turn it on themselves; the
-Kotlin conformance service keeps the library's default, and the harness turns it on through the service's
-environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that cannot route these sends through the
-hub answers them itself, and the harness reports them as not exercised (its `LOCAL_SENDERS`).
+turned on through its environment. The reference service and the Go and Python conformance services turn it on
+themselves; the Kotlin conformance service keeps the library's default, and the harness turns it on through the
+service's environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that cannot route these sends
+through the hub answers them itself, and the harness reports them as not exercised (its `LOCAL_SENDERS`).
 
 ## How each check is proved
 
