@@ -87,7 +87,7 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 ## Another language
 
 Add `images/<lang>/Dockerfile`, a service with that name in `compose.yaml` (`CONFORMANCE_INSTANCE_ID` = the
-name) and put the name in `LANGUAGES`, for example `LANGUAGES=go,rust,kotlin,python interop/run.sh`. The
+name) and put the name in `LANGUAGES`, for example `LANGUAGES=go,rust,kotlin,python,java interop/run.sh`. The
 driver derives every pair from the list. An image provides an entrypoint that starts the library's
 **conformance service** with no arguments (see [the conformance contract](../../../docs/contract.md)) and
 stops on SIGTERM within 5 s; `compose.yaml` sets the contract's environment, and the service serves every

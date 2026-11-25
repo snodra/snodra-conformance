@@ -10,7 +10,7 @@ on:
         required: false
         default: ""
       languages:
-        description: "interop: the languages to run (empty: go,rust,kotlin)"
+        description: "interop: the languages to run (empty: go,rust,kotlin,python)"
         required: false
         default: ""
 
@@ -135,8 +135,8 @@ jobs:
           persist-credentials: false
       - run: docker build -t snodra-conformance:ci .
 
-  # Services on the Kotlin, Rust and Go libraries talk to each other through a real hub
-  # (interop/README.md). Manual only: it builds three images from source.
+  # Services on the Kotlin, Rust, Go and Python libraries talk to each other through a real hub
+  # (interop/README.md). Manual only: it builds four images from source.
   interop:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
