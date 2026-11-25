@@ -2,23 +2,23 @@
 
 A protocol is what makes a Kotlin service and a Rust service interchangeable. The conformance runner
 proves each library alone against the protocol; this harness proves the libraries **against each other**:
-one conformance service per official library (Kotlin, Rust, Go), all registered on one real Snodra
+one conformance service per official library (Kotlin, Rust, Go, Python), all registered on one real Snodra
 Server as the service `conformance-interop` (instance id = the language), and a driver that makes every
 service send to every other through the hub.
 
 ```sh
-interop/run.sh                                  # LANGUAGES=go,rust,kotlin
+interop/run.sh                                  # LANGUAGES=go,rust,kotlin,python
 SNODRA_HUB_PORT=17000 interop/run.sh            # macOS: the AirPlay Receiver holds port 7000
 ```
 
-It needs Docker with compose (it builds three images and starts the hub image
+It needs Docker with compose (it builds four images and starts the hub image
 `snodra/snodra-server:${SNODRA_SERVER_VERSION:-0.6.0}`) and a Rust toolchain for the driver. It prints one
 line per exchange and stops everything it started.
 
-Every exchange runs through the hub and must pass. With the three official services the last line reads:
+Every exchange runs through the hub and must pass. With the four official services the last line reads:
 
 ```text
-interop: 3 languages, 21 exchanges passed through the hub, trace <id>
+interop: 4 languages, 32 exchanges passed through the hub, trace <id>
 ```
 
 **Read the summary line, not only the exit code**, when a service answers its own types in-process (see "Sends
@@ -34,8 +34,9 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging` release pinned in `Cargo.lock` |
 | `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.1`) |
 | `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.1.1`) |
+| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the ref `PYTHON_REF` (default `main`: the Python library publishes no conformance service artifact) |
 
-`GO_SRC` and `KOTLIN_SRC` name a local checkout instead of a ref
+`GO_SRC`, `KOTLIN_SRC` and `PYTHON_SRC` name a local checkout instead of a ref
 (`GO_SRC=~/src/snodra-messaging-go interop/run.sh`).
 
 ## What is asserted
@@ -72,20 +73,23 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 - **Sends to the sender's own types.** Every official library answers a command, and a point query of a
   type that is not shared, in-process when its own instance handles the type: the hub is not used and the
   routing key is ignored. Every service here handles `Echo` and `EchoQuery`, so such a send reaches another
-  language only when the service turns on its library's "always route through the hub" setting. The Rust
-  and Go services turn it on themselves; the Kotlin service keeps the default, and `compose.yaml` turns it on
-  through its environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that cannot be told
-  to route through the hub is named in `LOCAL_SENDERS` (comma-separated, empty by default): its keyed `Echo`
-  to another language and its unary `EchoQuery` are then reported as not exercised, never as passed, and
-  `INTEROP_STRICT=1` fails on them.
+  language only when the service turns on its library's "always route through the hub" setting. The Rust,
+  Go and Python services turn it on themselves; the Kotlin service keeps the default, and `compose.yaml`
+  turns it on through its environment (`SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB=true`). A service that
+  cannot be told to route through the hub is named in `LOCAL_SENDERS` (comma-separated, empty by default): its
+  keyed `Echo` to another language and its unary `EchoQuery` are then reported as not exercised, never as
+  passed, and `INTEROP_STRICT=1` fails on them.
 - **Streaming.** The serving instance of a stream is chosen by the hub (routing keys are ignored for
   queries); the harness checks the items, not who produced them.
 - **Outcome.** `conformance.Outcome` is a query, so the hub may route it to an instance that does not own the
   operation (`unknownOp`): the driver asks again.
 
-## A fifth language
+## Another language
 
-Add `images/<lang>/Dockerfile` (the Python slot, `images/python/README.md`, says what an image must provide),
-a service with that name in `compose.yaml` (`CONFORMANCE_INSTANCE_ID` = the name) and put the name in
-`LANGUAGES`, for example `LANGUAGES=go,rust,kotlin,python interop/run.sh`. The driver derives every pair from the
-list.
+Add `images/<lang>/Dockerfile`, a service with that name in `compose.yaml` (`CONFORMANCE_INSTANCE_ID` = the
+name) and put the name in `LANGUAGES`, for example `LANGUAGES=go,rust,kotlin,python interop/run.sh`. The
+driver derives every pair from the list. An image provides an entrypoint that starts the library's
+**conformance service** with no arguments (see [the conformance contract](../../../docs/contract.md)) and
+stops on SIGTERM within 5 s; `compose.yaml` sets the contract's environment, and the service serves every
+`conformance.*` type the matrix uses (`Echo`, `EchoQuery`, `Stream`, `Watch`, `Emit`, `Relay`, `Send` and
+`Outcome`).

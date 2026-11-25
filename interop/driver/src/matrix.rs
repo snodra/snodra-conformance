@@ -56,6 +56,11 @@ mod tests {
     }
 
     #[test]
+    fn four_languages_make_twelve_ordered_pairs() {
+        assert_eq!(pairs(&langs(&["go", "rust", "kotlin", "python"])).len(), 12);
+    }
+
+    #[test]
     fn a_pair_never_joins_a_language_to_itself() {
         assert!(
             pairs(&langs(&["go", "rust", "kotlin", "python"]))

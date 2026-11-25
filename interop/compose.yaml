@@ -59,3 +59,20 @@ services:
       # types in-process; this turns on snodra.messaging.hub.always-route-through-hub, so its sends
       # to Echo and EchoQuery reach the other languages through the hub as the others' do.
       SNODRA_MESSAGING_HUB_ALWAYSROUTETHROUGHHUB: "true"
+
+  python:
+    <<: *service
+    build:
+      context: images/python
+      # snodra-messaging-python's main branch carries examples/conformance-service (the library
+      # publishes no conformance service artifact, so the harness builds it from the source).
+      # PYTHON_REF overrides the ref; PYTHON_SRC names a local checkout instead.
+      additional_contexts:
+        pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-main}}
+    # The Python conformance service turns on the library's always-route-through-hub setting itself, so
+    # its sends to Echo and EchoQuery reach the other languages through the hub; no variable is needed.
+    environment:
+      CONFORMANCE_SERVICE_NAME: conformance-interop
+      CONFORMANCE_INSTANCE_ID: python
+      CONFORMANCE_HUBS: hub:7000
+      CONFORMANCE_CAPACITY: "16"
