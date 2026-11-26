@@ -86,8 +86,11 @@ SNODRA_HUB_PORT=17000 INTEROP_STRICT=1 LANGUAGES=go,python \
 ```
 
 The profile starts one Kafka KRaft broker, RabbitMQ with the stream plugin, PostgreSQL, MySQL and a
-single-node MongoDB replica set. The broker and database images are pinned by the same multi-architecture
-digests the add-ons' own integration tests use; the two probe images pin their base images by digest too.
+single-node MongoDB replica set. The broker and database images are pinned by digest, and the two probe
+images pin their base images by multi-architecture index digest. Kafka's pin is the one exception:
+`apache/kafka@sha256:76af3d01…` is a `linux/amd64` image manifest, not an index (the same pin the
+add-ons' own tests use), so the stores profile needs an amd64 Docker engine or emulation on an arm64
+host. RabbitMQ, PostgreSQL, MySQL and MongoDB are multi-architecture index digests.
 The profile creates one topic per Kafka family and one two-partition RabbitMQ super stream, and runs one
 `store-interop` process per language, each with one instance per store family (`<language>-<family>`,
 registered as the service `store-interop`).
