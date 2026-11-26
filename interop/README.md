@@ -34,7 +34,7 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging` release pinned in `Cargo.lock` |
 | `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.1`) |
 | `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.1.1`) |
-| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.1.0`) |
+| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.2.0`) |
 
 The harness runs the released tags of the three published libraries (Go, Kotlin, Python) by default, and
 the Rust reference service on the `snodra-messaging` release this repository pins.
