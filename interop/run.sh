@@ -20,6 +20,7 @@
 # were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
 
+script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")"
 profile=""
 while (($#)); do
@@ -29,7 +30,8 @@ while (($#)); do
       shift 2
       ;;
     --help | -h)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      # The whole header: every comment line from line 2 to the line before `set -euo pipefail`.
+      awk 'NR == 1 { next } /^set -euo pipefail$/ { exit } { sub(/^# ?/, ""); print }' "$script"
       exit 0
       ;;
     *)

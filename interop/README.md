@@ -75,8 +75,8 @@ the Rust reference service on the `snodra-messaging` release this repository pin
 ## The stores profile
 
 `interop/run.sh --profile stores` proves the shared **brokers and stores** instead of the hub's routing.
-It runs Go and Python only: the Kotlin and Rust store-interop services do not exist yet (see "Known
-limits"). With local checkouts:
+It currently supports `LANGUAGES=go,python` only: the Kotlin and Rust store-interop services do not
+exist yet (see "Known limits"). With local checkouts:
 
 ```sh
 unset DOCKER_HOST                          # Docker Desktop; on Rancher Desktop set unix://$HOME/.rd/docker.sock
@@ -86,10 +86,11 @@ SNODRA_HUB_PORT=17000 INTEROP_STRICT=1 LANGUAGES=go,python \
 ```
 
 The profile starts one Kafka KRaft broker, RabbitMQ with the stream plugin, PostgreSQL, MySQL and a
-single-node MongoDB replica set, every image pinned by digest (the same digests the add-ons' own
-integration tests use). It creates one topic per Kafka family and one two-partition RabbitMQ super
-stream, and runs one `store-interop` process per language, each with one instance per store family
-(`<language>-<family>`, registered as the service `store-interop`).
+single-node MongoDB replica set. The broker and database images are pinned by the same multi-architecture
+digests the add-ons' own integration tests use; the two probe images pin their base images by digest too.
+The profile creates one topic per Kafka family and one two-partition RabbitMQ super stream, and runs one
+`store-interop` process per language, each with one instance per store family (`<language>-<family>`,
+registered as the service `store-interop`).
 
 The driver asserts, and prints one `ok` line per scenario:
 
@@ -126,9 +127,12 @@ live only in those containers, so a finished run leaves nothing behind.
 ## Known limits
 
 - **Kotlin and Rust in the stores profile.** Their store-interop services do not exist yet: the
-  profile runs the Go and Python probes and refuses any other language set instead of skipping
-  scenarios. Adding the two services is a follow-up; the checks and the driver's scenario shape stay
-  as they are.
+  profile supports `LANGUAGES=go,python` only and refuses any other language set instead of skipping
+  scenarios. The follow-up is one probe per language (the same commands, `interop-<family>` processor
+  and subscription, an `images/store-<lang>` image), `KOTLIN_REF`/`RUST_REF` and their `_SRC`
+  variants, and the four-language generalization: the driver's `PARTITIONS` is two today (one per
+  language), so four languages need four partitions and the "each language reads the other's events"
+  assertions become per pair. The eight scenarios keep their shape.
 
 - **Sends to the sender's own types.** Every official library answers a command, and a point query of a
   type that is not shared, in-process when its own instance handles the type: the hub is not used and the
@@ -158,4 +162,6 @@ For the stores profile, the counterpart is one `examples/store-interop` probe pe
 `images/store-<lang>` image, and one instance `<language>-<family>` per store family on the service
 `store-interop`; the probe serves `orders.interop.Who`, `Publish`, `PublishRaw` and `State` and runs the
 `orders.OrderPlaced` event consumer in the processor `interop-<family>`. Kotlin and Rust have no such probe
-yet; adding them is the follow-up named above.
+yet; adding them is the follow-up named above. The driver's `PARTITIONS` constant is two (one partition per
+language), so a four-language profile also needs four partitions in `kafka-init`, the RabbitMQ topology and
+the driver, plus `KOTLIN_REF`/`RUST_REF` (and their `_SRC` variants) in `compose.yaml`.

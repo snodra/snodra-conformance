@@ -107,6 +107,7 @@ services:
   # family. Both register service store-interop; the instance ids are <language>-<family>.
   store-go:
     <<: *store
+    stop_grace_period: 60s
     build:
       context: images/store-go
       # The example lives in the library's repository; GO_REF defaults to main, the branch that
@@ -134,6 +135,7 @@ services:
 
   store-python:
     <<: *store
+    stop_grace_period: 60s
     build: *store-python-build
     depends_on:
       hub:
