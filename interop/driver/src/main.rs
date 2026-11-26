@@ -4,11 +4,12 @@
 //! every other and checks what arrives. See interop/README.md for what is asserted.
 
 mod matrix;
+mod stores;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use serde_json::{Value, json};
 use snodra_conformance::peer::{Peer, Registration, topology};
 use snodra_conformance::proto::RequestKind;
@@ -19,11 +20,28 @@ use matrix::{pairs, trace_id, traceparent};
 const SERVICE: &str = "conformance-interop";
 
 #[derive(Parser)]
-#[command(about = "Cross-language interoperability driver for Snodra client libraries")]
+#[command(
+    about = "Cross-language interoperability driver for Snodra client libraries",
+    args_conflicts_with_subcommands = true
+)]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
+    #[command(flatten)]
+    exchange: ExchangeArgs,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Prove the shared brokers and stores across languages
+    Stores(stores::StoresArgs),
+}
+
+#[derive(ClapArgs)]
+struct ExchangeArgs {
     /// The hub's address (host:port)
     #[arg(long)]
-    hub: String,
+    hub: Option<String>,
     /// The languages that must be registered, comma-separated; each is its instance id
     #[arg(long, value_delimiter = ',')]
     languages: Vec<String>,
@@ -50,10 +68,10 @@ fn authorization() -> String {
     format!("Bearer {header}.{claims}.{}", b64.encode("interop"))
 }
 
-type Res<T> = Result<T, String>;
+pub(crate) type Res<T> = Result<T, String>;
 
 /// A call of the driver: the type, a routing key, headers.
-struct Call<'a> {
+pub(crate) struct Call<'a> {
     kind: RequestKind,
     type_name: &'a str,
     key: Option<&'a str>,
@@ -61,7 +79,7 @@ struct Call<'a> {
     payload: Value,
 }
 
-async fn call(peer: &Peer, c: Call<'_>) -> Res<Value> {
+pub(crate) async fn call(peer: &Peer, c: Call<'_>) -> Res<Value> {
     let mut request = wire::with_headers(
         wire::request(&wire::new_id(), c.kind, c.type_name, &c.payload),
         &c.headers,
@@ -75,7 +93,7 @@ async fn call(peer: &Peer, c: Call<'_>) -> Res<Value> {
         .map_err(|e| format!("{}: {e:?}", c.type_name))
 }
 
-fn command<'a>(type_name: &'a str, key: Option<&'a str>, payload: Value) -> Call<'a> {
+pub(crate) fn command<'a>(type_name: &'a str, key: Option<&'a str>, payload: Value) -> Call<'a> {
     Call {
         kind: RequestKind::Command,
         type_name,
@@ -217,7 +235,11 @@ async fn send(
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    match run(&args).await {
+    let result = match &args.command {
+        Some(Command::Stores(stores)) => stores::run(stores).await,
+        None => run(&args.exchange).await,
+    };
+    match result {
         Ok(()) => {}
         Err(e) => {
             eprintln!("interop: FAILED: {e}");
@@ -226,12 +248,12 @@ async fn main() {
     }
 }
 
-async fn run(args: &Args) -> Res<()> {
+async fn run(args: &ExchangeArgs) -> Res<()> {
     let langs = &args.languages;
     if langs.len() < 2 {
         return Err("at least two languages are needed".into());
     }
-    let hub = &args.hub;
+    let hub = args.hub.as_deref().ok_or("--hub is required")?;
     let trace = uuid::Uuid::new_v4().simple().to_string();
     let mut exchanges = 0usize;
     let mut unexercised: Vec<String> = Vec::new();

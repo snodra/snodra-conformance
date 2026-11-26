@@ -1,5 +1,6 @@
 # One real hub and one conformance service per language, all as service `conformance-interop`
-# (instance id = the language). Run through run.sh.
+# (instance id = the language). The `stores` profile adds the brokers, the databases and one
+# store-interop probe process per language, on service `store-interop`. Run through run.sh.
 # The project name comes from run.sh (-p), unique per run.
 
 x-service: &service
@@ -7,6 +8,31 @@ x-service: &service
     hub:
       condition: service_started
   restart: "no"
+
+x-store: &store
+  profiles: ["stores"]
+  restart: "no"
+
+x-store-environment: &store-environment
+  INTEROP_RUN: ${INTEROP_RUN:-}
+  INTEROP_HUB: hub:7000
+  INTEROP_FAMILIES: kafka,rabbitmq,postgres,mysql,mongo
+  INTEROP_KAFKA_BOOTSTRAP: kafka:9092
+  INTEROP_RABBITMQ_HOST: rabbitmq
+  INTEROP_RABBITMQ_PORT: "5552"
+  INTEROP_RABBITMQ_USERNAME: guest
+  INTEROP_RABBITMQ_PASSWORD: guest
+  INTEROP_POSTGRES_URL: postgresql://snodra:snodra@postgres:5432/snodra_interop_${INTEROP_RUN}
+  INTEROP_MYSQL_URL: mysql://snodra:snodra@mysql:3306/snodra_interop_${INTEROP_RUN}
+  INTEROP_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+  INTEROP_MONGO_DATABASE: snodra_interop_${INTEROP_RUN}
+
+x-store-python-build: &store-python-build
+  context: images/store-python
+  # snodra-messaging-python's main carries examples/store-interop (the library publishes no
+  # probe artifact). PYTHON_REF overrides the ref; PYTHON_SRC names a local checkout instead.
+  additional_contexts:
+    pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-main}}
 
 services:
   hub:
@@ -76,3 +102,193 @@ services:
       CONFORMANCE_INSTANCE_ID: python
       CONFORMANCE_HUBS: hub:7000
       CONFORMANCE_CAPACITY: "16"
+
+  # The stores profile: the two probes, one process per language, each running one App per
+  # family. Both register service store-interop; the instance ids are <language>-<family>.
+  store-go:
+    <<: *store
+    build:
+      context: images/store-go
+      # The example lives in the library's repository; GO_REF defaults to main, the branch that
+      # carries it until the next release does. GO_SRC names a local checkout instead.
+      additional_contexts:
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-main}}
+    depends_on:
+      hub:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      rabbitmq-init:
+        condition: service_completed_successfully
+      mongo-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *store-environment
+      INTEROP_LANGUAGE: go
+
+  store-python:
+    <<: *store
+    build: *store-python-build
+    depends_on:
+      hub:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      rabbitmq-init:
+        condition: service_completed_successfully
+      mongo-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *store-environment
+      INTEROP_LANGUAGE: python
+
+  # One KRaft broker. Topics are created by kafka-init, never by a library (the wire rules say
+  # the infrastructure creates them).
+  kafka:
+    <<: *store
+    image: apache/kafka@sha256:76af3d0116abbb33b4cd964af410d4921c33d1f663e7a95d5453a9c35a84869b
+    environment:
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1",
+        ]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+      start_period: 10s
+
+  # The four Kafka families' topics, two partitions each: one partition per language.
+  kafka-init:
+    <<: *store
+    image: apache/kafka@sha256:76af3d0116abbb33b4cd964af410d4921c33d1f663e7a95d5453a9c35a84869b
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      INTEROP_RUN: ${INTEROP_RUN:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        for family in kafka postgres mysql mongo; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "snodra.interop.${INTEROP_RUN}.$$family" --partitions 2 --replication-factor 1
+        done
+
+  # RabbitMQ with the stream plugin and the single management plugin the diagnostics need. The
+  # super stream is created by rabbitmq-init (a library never creates it).
+  rabbitmq:
+    <<: *store
+    image: rabbitmq@sha256:753099a19b577c322117f793f864b3129cbba96d40317221a69d73976e3c843c
+    volumes:
+      - ./stores/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./stores/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-snodra.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+
+  # The one super stream, two partitions, created through the stream protocol by the same client
+  # the RabbitMQ add-on uses.
+  rabbitmq-init:
+    <<: *store
+    build: *store-python-build
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    entrypoint: ["/src/.venv/bin/python", "-m", "store_interop.topology"]
+    environment:
+      INTEROP_RUN: ${INTEROP_RUN:-}
+      INTEROP_RABBITMQ_HOST: rabbitmq
+      INTEROP_RABBITMQ_PORT: "5552"
+      INTEROP_RABBITMQ_USERNAME: guest
+      INTEROP_RABBITMQ_PASSWORD: guest
+
+  # The three shared message stores. Each run gets one database per server, named after the run.
+  postgres:
+    <<: *store
+    image: postgres:17.7@sha256:2006493727bd5277eece187319af1ef82b4cf82cf4fc1ed00da0775b646ac2a4
+    environment:
+      POSTGRES_USER: snodra
+      POSTGRES_PASSWORD: snodra
+      POSTGRES_DB: snodra_interop_${INTEROP_RUN}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snodra -d snodra_interop_${INTEROP_RUN}"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mysql:
+    <<: *store
+    image: mysql:8.4.7@sha256:0426ec38c7a10aa45ba383887df7878f74ee70e2fd589c7b69207f3577901903
+    environment:
+      MYSQL_ROOT_PASSWORD: snodra
+      MYSQL_DATABASE: snodra_interop_${INTEROP_RUN}
+      MYSQL_USER: snodra
+      MYSQL_PASSWORD: snodra
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-usnodra", "-psnodra", "--silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # A single-node replica set: the MongoDB add-on's transactions need one.
+  mongo:
+    <<: *store
+    image: mongo:8.0.15@sha256:f4d54619262ae3bc6a0a8efbebcef970b87b8ad70697479a75ce308a6f400158
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true",
+        ]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+      start_period: 5s
+
+  mongo-init:
+    <<: *store
+    image: mongo:8.0.15@sha256:f4d54619262ae3bc6a0a8efbebcef970b87b8ad70697479a75ce308a6f400158
+    depends_on:
+      mongo:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 60); do
+          mongosh --host mongo:27017 --quiet --eval \
+            "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}) }" && exit 0
+          sleep 1
+        done
+        exit 1
