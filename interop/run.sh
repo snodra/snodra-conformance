@@ -12,10 +12,9 @@
 # exchange or scenario could not be exercised), LOCAL_SENDERS (languages whose service answers a
 # unary send to a type it handles itself without the hub, comma-separated; default none: every
 # official service here sends through the hub), GO_REF / GO_SRC, KOTLIN_REF / KOTLIN_SRC and
-# PYTHON_REF / PYTHON_SRC (see compose.yaml; PYTHON_REF defaults to v0.2.0, the released tag that
-# carries the conformance service). The stores profile also reads INTEROP_RUN (the unique token of
-# the run; default generated), and GO_REF / PYTHON_REF default to main, the branch that carries
-# examples/store-interop until a release does.
+# PYTHON_REF / PYTHON_SRC (see compose.yaml; GO_REF defaults to v0.5.1 and PYTHON_REF to v0.6.0,
+# the released tags that carry the conformance and store-interop services). The stores profile
+# also reads INTEROP_RUN (the unique token of the run; default generated).
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
 # were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail

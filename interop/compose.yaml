@@ -29,10 +29,10 @@ x-store-environment: &store-environment
 
 x-store-python-build: &store-python-build
   context: images/store-python
-  # snodra-messaging-python's main carries examples/store-interop (the library publishes no
+  # snodra-messaging-python's tag v0.6.0 carries examples/store-interop (the library publishes no
   # probe artifact). PYTHON_REF overrides the ref; PYTHON_SRC names a local checkout instead.
   additional_contexts:
-    pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-main}}
+    pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-v0.6.0}}
 
 services:
   hub:
@@ -46,10 +46,10 @@ services:
     <<: *service
     build:
       context: images/go
-      # snodra-messaging-go's tag v0.1.1 carries examples/conformance-service.
+      # snodra-messaging-go's tag v0.5.1 carries examples/conformance-service.
       # GO_REF overrides the ref (for example GO_REF=main); GO_SRC names a local checkout instead.
       additional_contexts:
-        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.1.1}}
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.5.1}}
     environment:
       CONFORMANCE_SERVICE_NAME: conformance-interop
       CONFORMANCE_INSTANCE_ID: go
@@ -90,11 +90,11 @@ services:
     <<: *service
     build:
       context: images/python
-      # snodra-messaging-python's tag v0.2.0 carries examples/conformance-service (the library
+      # snodra-messaging-python's tag v0.6.0 carries examples/conformance-service (the library
       # publishes no conformance service artifact, so the harness builds it from the tag).
       # PYTHON_REF overrides the ref; PYTHON_SRC names a local checkout instead.
       additional_contexts:
-        pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-v0.2.0}}
+        pysrc: ${PYTHON_SRC:-https://github.com/snodra/snodra-messaging-python.git#${PYTHON_REF:-v0.6.0}}
     # The Python conformance service turns on the library's always-route-through-hub setting itself, so
     # its sends to Echo and EchoQuery reach the other languages through the hub; no variable is needed.
     environment:
@@ -110,10 +110,10 @@ services:
     stop_grace_period: 60s
     build:
       context: images/store-go
-      # The example lives in the library's repository; GO_REF defaults to main, the branch that
-      # carries it until the next release does. GO_SRC names a local checkout instead.
+      # The example lives in the library's repository; GO_REF defaults to v0.5.1, the released tag
+      # that carries examples/store-interop. GO_SRC names a local checkout instead.
       additional_contexts:
-        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-main}}
+        gosrc: ${GO_SRC:-https://github.com/snodra/snodra-messaging-go.git#${GO_REF:-v0.5.1}}
     depends_on:
       hub:
         condition: service_started
