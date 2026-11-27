@@ -50,9 +50,8 @@ language for the routing matrix, and a `stores` profile with one probe per langu
 Kafka topic, RabbitMQ super stream, PostgreSQL, MySQL and MongoDB. The stores profile also drives the
 hub's dashboard HTTP API against the two services: pause and resume, a leased reset with its replay
 ranges and positions, dead-letter retry (including a letter one language parks and the other retries),
-`retry-all` and discard, and the event-store dead-letter mode. The released Go and Python tags carry
-the level-2 probe only, so the stores profile requires local checkouts (`GO_SRC`, `PYTHON_SRC`) and
-refuses to run without them until a release carries the processor-control ports. See
+`retry-all` and discard, and the event-store dead-letter mode. Go and Python run from their released
+tags by default (v0.6.0 and v0.7.0); `GO_SRC` and `PYTHON_SRC` name local checkouts instead. See
 [interop/README.md](interop/README.md) for the command, the scenarios and the exact assertions.
 
 ## Run it

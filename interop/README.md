@@ -34,8 +34,8 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 |---|---|
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging` release pinned in `Cargo.lock` |
 | `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.1`) |
-| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.5.1`) |
-| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.6.0`) |
+| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.6.0`) |
+| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.7.0`) |
 
 The harness runs the released tags of the three published libraries (Go, Kotlin, Python) by default, and
 the Rust reference service on the `snodra-messaging` release this repository pins.
@@ -77,14 +77,16 @@ the Rust reference service on the `snodra-messaging` release this repository pin
 `interop/run.sh --profile stores` proves the shared **brokers and stores** instead of the hub's routing,
 and then drives the hub's **processor control plane** against the two services. It currently supports
 `LANGUAGES=go,python` only: the Kotlin and Rust store-interop services do not exist yet (see "Known
-limits"). With local checkouts:
+limits"). From the released tags:
 
 ```sh
 unset DOCKER_HOST                          # Docker Desktop; on Rancher Desktop set unix://$HOME/.rd/docker.sock
 SNODRA_HUB_PORT=17000 INTEROP_STRICT=1 LANGUAGES=go,python \
-  GO_SRC=~/src/snodra-messaging-go PYTHON_SRC=~/src/snodra-messaging-python \
   interop/run.sh --profile stores
 ```
+
+Add `GO_SRC=~/src/snodra-messaging-go` and/or `PYTHON_SRC=~/src/snodra-messaging-python` to replace a
+released tag with a local checkout.
 
 The profile starts one Kafka KRaft broker, RabbitMQ with the stream plugin, PostgreSQL, MySQL and a
 single-node MongoDB replica set. The broker and database images are pinned by digest, and the two probe
@@ -171,14 +173,12 @@ changes nothing there.
 
 The two probe processes run one App per family on the library's public API, with the real outbox,
 relay, event consumer, event store and message store add-ons. `images/store-go` and
-`images/store-python` build them from `GO_REF` / `PYTHON_REF` (the released tags `v0.5.1` and
-`v0.6.0`), or from `GO_SRC` / `PYTHON_SRC`. The stores profile **requires** the local checkouts:
-`run.sh` exits 2 when either is unset, because the released refs answer the level-2 probe commands
-only. The Python probe reports its status every 4 s (the Go one keeps the 5 s default), so the two
-report phases drift and the driver can wait for either language to be the freshest instance the hub
-picks for a reset or a dead-letter call. `run.sh` stops every container and anonymous volume it
-started; the topics, streams and databases live only in those containers, so a finished run leaves
-nothing behind.
+`images/store-python` build them from `GO_REF` / `PYTHON_REF` (the released tags `v0.6.0` and
+`v0.7.0`), or from `GO_SRC` / `PYTHON_SRC`, which override the tags. The Python probe reports its
+status every 4 s (the Go one keeps the 5 s default), so the two report phases drift and the driver can
+wait for either language to be the freshest instance the hub picks for a reset or a dead-letter call.
+`run.sh` stops every container and anonymous volume it started; the topics, streams and databases live
+only in those containers, so a finished run leaves nothing behind.
 
 ## Known limits
 
@@ -189,11 +189,6 @@ nothing behind.
   variants, and the four-language generalization: the driver's `PARTITIONS` is two today (one per
   language), so four languages need four partitions and the "each language reads the other's events"
   assertions become per pair. The scenarios keep their shape.
-
-- **The stores profile requires local checkouts.** The released Go and Python tags carry the level-2
-  probe only: `ControlSet`, `Poison` and `Allow` arrive with the processor-control work.
-  `run.sh --profile stores` exits 2 when `GO_SRC` or `PYTHON_SRC` is unset rather than building the
-  released refs and failing at the first unknown command.
 
 - **The event-store dead-letter mode is proved on RabbitMQ.** The `rabbitmq` family publishes to its
   `.dlt` super stream and the probe subscribes there; the Kafka families stay in `collection` mode, so
