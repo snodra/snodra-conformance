@@ -34,8 +34,8 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 |---|---|
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging` release pinned in `Cargo.lock` |
 | `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.1`) |
-| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.1.1`) |
-| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.2.0`) |
+| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.5.1`) |
+| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.6.0`) |
 
 The harness runs the released tags of the three published libraries (Go, Kotlin, Python) by default, and
 the Rust reference service on the `snodra-messaging` release this repository pins.
@@ -74,9 +74,10 @@ the Rust reference service on the `snodra-messaging` release this repository pin
 
 ## The stores profile
 
-`interop/run.sh --profile stores` proves the shared **brokers and stores** instead of the hub's routing.
-It currently supports `LANGUAGES=go,python` only: the Kotlin and Rust store-interop services do not
-exist yet (see "Known limits"). With local checkouts:
+`interop/run.sh --profile stores` proves the shared **brokers and stores** instead of the hub's routing,
+and then drives the hub's **processor control plane** against the two services. It currently supports
+`LANGUAGES=go,python` only: the Kotlin and Rust store-interop services do not exist yet (see "Known
+limits"). With local checkouts:
 
 ```sh
 unset DOCKER_HOST                          # Docker Desktop; on Rancher Desktop set unix://$HOME/.rd/docker.sock
@@ -91,11 +92,16 @@ images pin their base images by multi-architecture index digest. Kafka's pin is 
 `apache/kafka@sha256:76af3d01…` is a `linux/amd64` image manifest, not an index (the same pin the
 add-ons' own tests use), so the stores profile needs an amd64 Docker engine or emulation on an arm64
 host. RabbitMQ, PostgreSQL, MySQL and MongoDB are multi-architecture index digests.
-The profile creates one topic per Kafka family and one two-partition RabbitMQ super stream, and runs one
-`store-interop` process per language, each with one instance per store family (`<language>-<family>`,
-registered as the service `store-interop`).
+The profile creates one topic per Kafka family, one two-partition RabbitMQ super stream and its
+dead-letter super stream, and runs one `store-interop` process per language, each with one instance per
+store family (`<language>-<family>`, registered as the service `store-interop`).
 
-The driver asserts, and prints one `ok` line per scenario:
+The hub's gRPC port is `SNODRA_HUB_PORT` (7000 by default) and its dashboard HTTP API is
+`SNODRA_HUB_HTTP_PORT` (one above it by default), both published on `127.0.0.1`. The driver uses the
+HTTP API for the control scenarios; `run.sh` sets `INTEROP_HUB_WRITE_TOKEN` for both the hub
+(`SNODRA_SERVER_DASHBOARD_WRITE_TOKEN`) and the driver.
+
+The driver asserts, and prints one `ok` line per scenario; every one is required:
 
 1. **A shared Kafka consumer group.** The `kafka` family appends events to the outbox from both
    languages; the group `store-interop.interop-kafka` delivers every event exactly once, each
@@ -110,6 +116,38 @@ The driver asserts, and prints one `ok` line per scenario:
 4. **A processed marker skips the duplicate in the other language.** One event id is published on
    partition 0 (handled by the language that owns it) and again on partition 1: the other language's
    consumer finds the marker and records a duplicate delivery, one handled delivery in all.
+5. **The status view.** `GET /api/v1/processors` reports every family's processor with two instances,
+   its subscription and source, its event store (`kafka` or `rabbitmq-streams`), its capabilities and
+   its dead-letter mode (`collection`, or `event-store` on RabbitMQ).
+6. **Pause and resume through the hub.** `POST …/pause` acknowledges both instances; the status turns
+   `PAUSED`; events published while paused are not handled; `POST …/resume` acknowledges both and the
+   paused events are delivered. The hub's report, not a probe's guess, is asserted.
+7. **A pause set by one language, obeyed by the other.** Go writes `paused = true` (by `go`) into the
+   shared control store; Python's state reads `pausedBy: go` on its own poll, its status becomes
+   `PAUSED`, and an event published meanwhile is not handled. The hub's resume releases both.
+8. **Reset and replay on a Go and on a Python service.** The processor is paused, then
+   `POST …/reset {"to":"earliest"}` is called with the desired instance's report the freshest (the hub
+   executes on that instance): the report names it as `executedBy`, every instance prepares and
+   finishes, the ranges, deleted markers and the reset handler are counted, the status reports
+   `replaying` with the reset's `replayUntil`, the committed positions moved to each range's `from`,
+   and after `POST …/resume` the replay closes while the normal handler runs again and the
+   `@DisallowReplay`/`replay=False` handler does not.
+9. **A dead letter parked by one language, retried by the other.** Go's handler rejects an event on
+   its partition on PostgreSQL; both languages list the `HANDLER_FAILED` letter in the shared store;
+   both instances are allowed the id, the hub's retry goes to the freshest instance, and the response
+   names the Python instance, `Retried`; the letter is gone, the marker is visible to both and Python's
+   handler recorded the delivery.
+10. **Retry on the parking language.** The same on MySQL (Go parks and Go retries) and on MongoDB
+    (Python parks and Python retries), so the hub's retry is proved on each language by itself.
+11. **`retry-all` and discard.** Two failing letters on MongoDB are retried in one call: the hub
+    reports `failed: 2`, both stay, and `DELETE` removes each; the store lists none afterwards.
+12. **The event-store dead-letter mode end to end.** The RabbitMQ processor runs in mode
+    `event-store`; a record no handler takes is published to `<source>.dlt`, the probe's subscription
+    receives it with its key and payload and the six `snodra-dlt-*` headers, and the hub's
+    dead-letter call answers `400 INVALID` because there is no collection to list.
+13. **A capability the hub refuses.** The RabbitMQ broker has no management API, so the event store
+    declares no replay: `POST …/reset` answers `409 UNSUPPORTED` naming the event store before any
+    instance is asked.
 
 Names carry a run token generated by `run.sh`: the sources are
 `snodra.interop.<run>.<family>`, the shared databases `snodra_interop_<run>`, and every topic and
@@ -117,15 +155,18 @@ super stream has two partitions (one per language). `INTEROP_RUN` overrides the 
 reads:
 
 ```text
-stores: 2 languages, 8 scenarios passed across kafka,rabbitmq,postgres,mysql,mongo, run <token>
+stores: 2 languages, 19 scenarios passed across kafka,rabbitmq,postgres,mysql,mongo, run <token>
 ```
 
 The two probe processes run one App per family on the library's public API, with the real outbox,
 relay, event consumer, event store and message store add-ons. `images/store-go` and
-`images/store-python` build them from `GO_REF` / `PYTHON_REF` (both default to `main`, the branch
-that carries `examples/store-interop` until a release does), or from `GO_SRC` / `PYTHON_SRC`.
-`run.sh` stops every container and anonymous volume it started; the topics, streams and databases
-live only in those containers, so a finished run leaves nothing behind.
+`images/store-python` build them from `GO_REF` / `PYTHON_REF` (the released tags `v0.5.1` and
+`v0.6.0`), or from `GO_SRC` / `PYTHON_SRC`. The processor-control scenarios need the local
+checkouts: the released refs answer the level-2 probe commands only. The Python probe reports its
+status every 4 s (the Go one keeps the 5 s default), so the two report phases drift and the driver
+can wait for either language to be the freshest instance the hub picks for a reset or a dead-letter
+call. `run.sh` stops every container and anonymous volume it started; the topics, streams and
+databases live only in those containers, so a finished run leaves nothing behind.
 
 ## Known limits
 
@@ -135,7 +176,20 @@ live only in those containers, so a finished run leaves nothing behind.
   and subscription, an `images/store-<lang>` image), `KOTLIN_REF`/`RUST_REF` and their `_SRC`
   variants, and the four-language generalization: the driver's `PARTITIONS` is two today (one per
   language), so four languages need four partitions and the "each language reads the other's events"
-  assertions become per pair. The eight scenarios keep their shape.
+  assertions become per pair. The scenarios keep their shape.
+
+- **The control scenarios need local checkouts.** The released Go and Python tags carry the level-2
+  probe only: `ControlSet`, `Poison` and `Allow` arrive with the processor-control work. Until a
+  release carries them, run the profile with `GO_SRC` and `PYTHON_SRC`; the harness warns when they
+  are unset, and the control scenarios fail at the first unknown command instead of being skipped.
+
+- **The event-store dead-letter mode is proved on RabbitMQ.** The `rabbitmq` family publishes to its
+  `.dlt` super stream and the probe subscribes there; the Kafka families stay in `collection` mode, so
+  the Kafka `.dlt` topic is not created by this profile.
+
+- **A pause in a non-shared store is per instance.** On the `kafka` and `rabbitmq` families the
+  message store is in memory, so a pause one language writes is not visible to the other; the
+  cross-language pause scenario uses MySQL, whose control document both languages share.
 
 - **Sends to the sender's own types.** Every official library answers a command, and a point query of a
   type that is not shared, in-process when its own instance handles the type: the hub is not used and the

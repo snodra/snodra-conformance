@@ -41,6 +41,13 @@ services:
     # Receiver: set SNODRA_HUB_PORT (for example 17000).
     ports:
       - "127.0.0.1:${SNODRA_HUB_PORT:-7000}:7000"
+      # The dashboard HTTP API (the control plane the stores profile drives) listens on 7001.
+      - "127.0.0.1:${SNODRA_HUB_HTTP_PORT:-7001}:7001"
+    environment:
+      # The write credential of the processor controls the driver exercises (pause, resume,
+      # reset, dead-letter retry). The dashboard reads stay open; the token is the same value
+      # run.sh exports to the driver. Set INTEROP_HUB_WRITE_TOKEN to change it.
+      SNODRA_SERVER_DASHBOARD_WRITE_TOKEN: ${INTEROP_HUB_WRITE_TOKEN:-snodra-interop-write-token}
 
   go:
     <<: *service
@@ -155,6 +162,11 @@ services:
     environment:
       <<: *store-environment
       INTEROP_LANGUAGE: python
+      # The hub picks the executor of a reset and the instance of a dead-letter call by the age of
+      # their status reports. Go keeps the 5 s default; Python reports every 4 s so the phases
+      # drift and the driver can wait for either language to be the freshest, instead of the two
+      # 5 s timers locking one language ahead forever.
+      SNODRA_SERVER_STATUS_INTERVAL_MS: "4000"
 
   # One KRaft broker. Topics are created by kafka-init, never by a library (the wire rules say
   # the infrastructure creates them).

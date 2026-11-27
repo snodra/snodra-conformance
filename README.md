@@ -43,6 +43,18 @@ conformance contract — connects it to a real Snodra Server and to fake hubs of
 
 Levels 2 to 4 are proved by the libraries' own event-store and message-store conformance kits.
 
+## Cross-language interoperability
+
+`interop/` proves the libraries **against each other** on one real hub: one conformance service per
+language for the routing matrix, and a `stores` profile with one probe per language for the shared
+Kafka topic, RabbitMQ super stream, PostgreSQL, MySQL and MongoDB. The stores profile also drives the
+hub's dashboard HTTP API against the two services: pause and resume, a leased reset with its replay
+ranges and positions, dead-letter retry (including a letter one language parks and the other retries),
+`retry-all` and discard, and the event-store dead-letter mode. The released Go and Python tags carry
+the level-2 probe only, so the control scenarios run from local checkouts (`GO_SRC`, `PYTHON_SRC`)
+until a release carries the processor-control ports. See [interop/README.md](interop/README.md) for
+the command, the scenarios and the exact assertions.
+
 ## Run it
 
 The runner has two subcommands: `run` (the checks) and `list` (the check ids and what each needs).

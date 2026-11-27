@@ -5,16 +5,20 @@
 #   SNODRA_HUB_PORT=17000 interop/run.sh --profile stores
 #
 # Environment: LANGUAGES (default go,rust,kotlin,python; the stores profile runs go,python),
-# SNODRA_SERVER_VERSION (hub image, default 0.6.0), SNODRA_HUB_PORT (the hub's host port, default
-# 7000; use 17000 on macOS, where the AirPlay Receiver holds 7000), INTEROP_PROJECT (the compose
-# project name; default snodra-interop-<pid>, so two runs on one host do not stop each other, but
-# two runs need two SNODRA_HUB_PORT values), INTEROP_STRICT=1 (exit non-zero when a required
-# exchange or scenario could not be exercised), LOCAL_SENDERS (languages whose service answers a
-# unary send to a type it handles itself without the hub, comma-separated; default none: every
-# official service here sends through the hub), GO_REF / GO_SRC, KOTLIN_REF / KOTLIN_SRC and
-# PYTHON_REF / PYTHON_SRC (see compose.yaml; GO_REF defaults to v0.5.1 and PYTHON_REF to v0.6.0,
-# the released tags that carry the conformance and store-interop services). The stores profile
-# also reads INTEROP_RUN (the unique token of the run; default generated).
+# SNODRA_SERVER_VERSION (hub image, default 0.6.0), SNODRA_HUB_PORT (the hub's gRPC host port,
+# default 7000; use 17000 on macOS, where the AirPlay Receiver holds 7000),
+# SNODRA_HUB_HTTP_PORT (the dashboard HTTP host port, default one above SNODRA_HUB_PORT),
+# INTEROP_PROJECT (the compose project name; default snodra-interop-<pid>, so two runs on one host
+# do not stop each other, but two runs need two SNODRA_HUB_PORT values), INTEROP_STRICT=1 (exit
+# non-zero when a required exchange or scenario could not be exercised), LOCAL_SENDERS (languages
+# whose service answers a unary send to a type it handles itself without the hub, comma-separated;
+# default none: every official service here sends through the hub), GO_REF / GO_SRC, KOTLIN_REF /
+# KOTLIN_SRC and PYTHON_REF / PYTHON_SRC (see compose.yaml; GO_REF defaults to v0.5.1 and
+# PYTHON_REF to v0.6.0, the released tags that carry the conformance and store-interop services).
+# The stores profile also reads INTEROP_RUN (the unique token of the run; default generated) and
+# INTEROP_HUB_WRITE_TOKEN (the dashboard write credential the control scenarios use; default
+# snodra-interop-write-token). Its processor-control scenarios need GO_SRC and PYTHON_SRC until a
+# release carries the processor-control ports: the released refs answer the level-2 commands only.
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
 # were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
@@ -41,6 +45,9 @@ while (($#)); do
 done
 port="${SNODRA_HUB_PORT:-7000}"
 export SNODRA_HUB_PORT="$port"
+http_port="${SNODRA_HUB_HTTP_PORT:-$((port + 1))}"
+export SNODRA_HUB_HTTP_PORT="$http_port"
+export INTEROP_HUB_WRITE_TOKEN="${INTEROP_HUB_WRITE_TOKEN:-snodra-interop-write-token}"
 project="${INTEROP_PROJECT:-snodra-interop-$$}"
 compose() { docker compose -p "$project" "$@"; }
 strict=()
@@ -76,9 +83,12 @@ case "$profile" in
     fi
     run="${INTEROP_RUN:-$(date +%s)$$}"
     export INTEROP_RUN="$run"
+    if [[ -z "${GO_SRC:-}" || -z "${PYTHON_SRC:-}" ]]; then
+      echo "run.sh --profile stores: the processor-control scenarios need GO_SRC and PYTHON_SRC; the released refs carry the level-2 probe only" >&2
+    fi
     compose --profile stores up -d --build --wait hub store-go store-python
     status=0
-    cargo run -q -p snodra-interop -- stores --hub "127.0.0.1:$port" --languages "$languages" --run "$run" ${strict[@]+"${strict[@]}"} || status=$?
+    cargo run -q -p snodra-interop -- stores --hub "127.0.0.1:$port" --hub-api "127.0.0.1:$http_port" --languages "$languages" --run "$run" ${strict[@]+"${strict[@]}"} || status=$?
     if ((status != 0)); then
       compose logs --no-color --tail 100 store-go store-python kafka kafka-init rabbitmq rabbitmq-init postgres mysql mongo mongo-init >&2 || true
     fi

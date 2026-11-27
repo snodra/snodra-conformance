@@ -3,6 +3,7 @@
 //! raw client of that hub (the conformance runner's `Peer`) that makes every service send to
 //! every other and checks what arrives. See interop/README.md for what is asserted.
 
+mod hub;
 mod matrix;
 mod stores;
 

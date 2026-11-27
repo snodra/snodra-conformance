@@ -25,7 +25,10 @@ use serde_json::json;
 
 use snodra_conformance::peer::{Peer, Registration, topology};
 
-use crate::{Res, call, command};
+use crate::Res;
+use crate::call;
+use crate::command;
+use crate::hub::Api;
 
 /// The service every probe registers.
 const SERVICE: &str = "store-interop";
@@ -37,12 +40,21 @@ const SHARED: [&str; 3] = ["postgres", "mysql", "mongo"];
 const PARTITIONS: usize = 2;
 /// The languages the profile supports.
 const LANGUAGES: [&str; 2] = ["go", "python"];
+/// The event type the probes publish.
+const EVENT_TYPE: &str = "orders.OrderPlaced";
+/// The level-3 control scenarios after the eight level-2 ones: status, pause, a pause set in one
+/// language seen by the other, two resets, three dead-letter retries, retry-all and discard, the
+/// event-store dead-letter mode, and a reset the hub refuses for the missing capability.
+const L3_SCENARIOS: usize = 11;
 
 #[derive(ClapArgs)]
 pub struct StoresArgs {
     /// The hub's address (host:port)
     #[arg(long)]
     hub: String,
+    /// The hub's dashboard API (host:port); the harness passes the HTTP port it published
+    #[arg(long)]
+    hub_api: String,
     /// The languages that must be registered, comma-separated (`go,python`)
     #[arg(long, value_delimiter = ',')]
     languages: Vec<String>,
@@ -89,6 +101,81 @@ struct StateReply {
     outbox_pending: i64,
     deliveries: Vec<Delivery>,
     markers: BTreeMap<String, bool>,
+    #[serde(default)]
+    handled: i64,
+    #[serde(default)]
+    opted_out: u64,
+    #[serde(default)]
+    paused: bool,
+    #[serde(default)]
+    paused_by: Option<String>,
+    #[serde(default)]
+    replay: Vec<ReplayView>,
+    #[serde(default)]
+    dead_letters: Vec<LetterBrief>,
+    #[serde(default)]
+    dead_letter_total: i64,
+    #[serde(default)]
+    dlt: Vec<DltEvent>,
+    #[serde(default)]
+    dlt_total: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayView {
+    segment: String,
+    #[serde(rename = "from")]
+    from: String,
+    until: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LetterBrief {
+    id: String,
+    reason: String,
+    #[serde(default)]
+    event_id: Option<String>,
+    #[serde(default)]
+    attempts: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DltEvent {
+    id: String,
+    #[serde(rename = "type")]
+    type_name: String,
+    #[serde(default)]
+    key: Option<String>,
+    segment: String,
+    position: String,
+    headers: BTreeMap<String, String>,
+    payload: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ControlReply {
+    instance: String,
+    paused: bool,
+    #[serde(default)]
+    paused_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PoisonReply {
+    instance: String,
+    published: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AllowReply {
+    instance: String,
+    allowed: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +206,27 @@ fn database_name(run: &str) -> String {
 
 fn subscription_name(family: &str) -> String {
     format!("{SERVICE}.interop-{family}")
+}
+
+/// The processor of one family, as the hub's control paths name it.
+fn processor_name(family: &str) -> String {
+    format!("interop-{family}")
+}
+
+/// A fresh key that lands on `partition` of the family's source, by the family's own rule.
+fn key_on_partition(family: &str, run: &str, partition: &str, salt: &str) -> Res<String> {
+    let want = partition
+        .parse::<usize>()
+        .map_err(|_| format!("partition {partition:?} is not a number"))?;
+    for n in 0..100_000 {
+        let key = format!("interop-{run}-{salt}-{n}");
+        if partition_of(family, &key, PARTITIONS) == want {
+            return Ok(key);
+        }
+    }
+    Err(format!(
+        "no key of interop-{run}-{salt}-0..99999 lands on partition {partition}"
+    ))
 }
 
 fn is_shared(family: &str) -> bool {
@@ -196,7 +304,9 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
     println!("ok   routing keys: {} instances addressed", keys.len());
     check_names(&peer, &keys, &languages, &args.run).await?;
 
+    let api = Api::new(&args.hub_api);
     let mut scenarios = 0usize;
+
     for family in FAMILIES {
         let owners = ready(&peer, &keys, &languages, family, &args.run).await?;
         outbox_scenario(&peer, &keys, &languages, family, &args.run).await?;
@@ -220,6 +330,53 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
             scenarios += 1;
         }
     }
+
+    // The hub's own control plane, driven through its dashboard API. Pause and resume reach
+    // every instance; a reset is a leased operation the hub reports on; a dead-letter call goes
+    // to the instance with the freshest status, whichever language that is.
+    let line = status_scenario(&api, &args.run).await?;
+    println!("ok   status: {line}");
+    scenarios += 1;
+
+    let line = pause_scenario(&api, &peer, &keys, &languages, &args.run).await?;
+    println!("ok   pause: {line}");
+    scenarios += 1;
+
+    let line = cross_pause_scenario(&api, &peer, &keys, &languages, &args.run).await?;
+    println!("ok   pause: {line}");
+    scenarios += 1;
+
+    for (family, language) in [("postgres", "go"), ("mysql", "python")] {
+        let line = reset_scenario(&api, &peer, &keys, &languages, family, language).await?;
+        println!("ok   reset: {line}");
+        scenarios += 1;
+    }
+
+    for (family, park, retry, tag) in [
+        ("postgres", "go", "python", "cross"),
+        ("mysql", "go", "go", "go"),
+        ("mongo", "python", "python", "python"),
+    ] {
+        let line = dead_letter_scenario(
+            &api, &peer, &keys, &languages, family, park, retry, &args.run, tag,
+        )
+        .await?;
+        println!("ok   dead letter: {line}");
+        scenarios += 1;
+    }
+
+    let line = retry_all_scenario(&api, &peer, &keys, &languages, &args.run).await?;
+    println!("ok   dead letter: {line}");
+    scenarios += 1;
+
+    let line = dlt_scenario(&api, &peer, &keys, &languages, &args.run).await?;
+    println!("ok   dead letter: {line}");
+    scenarios += 1;
+
+    let line = reset_unsupported_scenario(&api).await?;
+    println!("ok   reset: {line}");
+    scenarios += 1;
+
     println!(
         "ok   names: sources {} (run {}), one database {} for {}",
         FAMILIES
@@ -231,7 +388,7 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
         database_name(&args.run),
         SHARED.join(", ")
     );
-    let expected = FAMILIES.len() + SHARED.len();
+    let expected = FAMILIES.len() + SHARED.len() + L3_SCENARIOS;
     if scenarios != expected {
         return Err(format!(
             "{} of {expected} scenarios ran; the stores profile requires every one",
@@ -805,18 +962,982 @@ async fn marker_scenario(
     Ok((owner0.language.clone(), owner1.language.clone()))
 }
 
-/// Every delivery of one event across the instances.
-fn deliveries_of<'a>(observed: &'a [StateReply], id: &str) -> Vec<(&'a StateReply, &'a Delivery)> {
-    observed
+/// One scenario: the hub's status view of every family, which every other control scenario reads
+/// back.
+async fn status_scenario(api: &Api, run: &str) -> Res<String> {
+    for family in FAMILIES {
+        let processor = processor_name(family);
+        let p = wait_processor(api, &processor, Duration::from_secs(30), |p| {
+            p.instances_reporting == 2 && p.state == "RUNNING"
+        })
+        .await?;
+        if p.instances_reporting != 2 {
+            return Err(format!(
+                "{processor}: the hub sees {} instance(s), not 2: {p:?}",
+                p.instances_reporting
+            ));
+        }
+        if p.subscription != subscription_name(family)
+            || p.source != source_name(run, family)
+            || p.event_store != expected_event_store(family)
+        {
+            return Err(format!(
+                "{processor}: the hub's names are not the run's: {p:?}"
+            ));
+        }
+        if p.dead_letter_mode
+            != if family == "rabbitmq" {
+                "event-store"
+            } else {
+                "collection"
+            }
+        {
+            return Err(format!(
+                "{processor}: the dead-letter mode is {:?}",
+                p.dead_letter_mode
+            ));
+        }
+        if !p.can("lag") {
+            return Err(format!(
+                "{processor}: the hub reports no lag capability: {:?}",
+                p.capabilities
+            ));
+        }
+        if family != "rabbitmq" && !p.can("replay") {
+            return Err(format!(
+                "{processor}: the hub reports no replay capability: {:?}",
+                p.capabilities
+            ));
+        }
+        if family == "rabbitmq" {
+            if p.can("replay") {
+                return Err(format!(
+                    "{processor}: the hub reports replay, but this broker has no management API: {:?}",
+                    p.capabilities
+                ));
+            }
+            if !p.can("native-dead-letter") {
+                return Err(format!(
+                    "{processor}: the hub reports no native-dead-letter capability: {:?}",
+                    p.capabilities
+                ));
+            }
+        }
+        if p.state != "RUNNING" {
+            return Err(format!("{processor}: the hub's state is {:?}", p.state));
+        }
+        for language in LANGUAGES {
+            let instance = instance(language, family);
+            let report = p
+                .instance(&instance)
+                .ok_or_else(|| format!("{processor}: the hub reports no {instance}"))?;
+            if report.report.state != "RUNNING"
+                || report.report.event_store != expected_event_store(family)
+            {
+                return Err(format!("{instance}: the hub's report is {report:?}"));
+            }
+        }
+    }
+    Ok(format!(
+        "the hub reports every family's processor with its event store, capabilities and mode ({})",
+        FAMILIES
+            .iter()
+            .map(|f| format!("{}:{}", f, expected_event_store(f)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+/// The hub's pause fan-out stops both languages' consumers and its resume starts them again: the
+/// report names both instances, the status reflects PAUSED/RUNNING, and nothing is handled while
+/// paused.
+async fn pause_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    run: &str,
+) -> Res<String> {
+    let family = "postgres";
+    let processor = processor_name(family);
+    let expected: BTreeSet<String> = languages
         .iter()
-        .flat_map(|state| {
+        .map(|language| instance(language, family))
+        .collect();
+
+    let (status, report, body) = api.pause(&processor).await?;
+    if status != 200 {
+        return Err(format!("POST pause {processor}: {status} {body}"));
+    }
+    check_pause(&report, "pause", &expected)?;
+    wait_processor(api, &processor, Duration::from_secs(15), |p| {
+        p.state == "PAUSED" && p.instances.iter().all(|i| i.report.state == "PAUSED")
+    })
+    .await
+    .map_err(|e| format!("after pause: {e}"))?;
+
+    let partitions = partition_keys(family, run);
+    let ids = [format!("pause-{run}-0"), format!("pause-{run}-1")];
+    let publisher = instance(&languages[0], family);
+    publish_raw(
+        peer,
+        keys,
+        &publisher,
+        run,
+        family,
+        "pause",
+        &ids,
+        &partitions,
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let observed = states(peer, keys, languages, family, &[]).await?;
+    if let Some((state, delivery)) = observed.iter().find_map(|state| {
+        state
+            .deliveries
+            .iter()
+            .find(|delivery| ids.contains(&delivery.id))
+            .map(|delivery| (state, delivery))
+    }) {
+        return Err(format!(
+            "the paused {} still delivered {} ({:?})",
+            state.instance, delivery.id, delivery.outcome
+        ));
+    }
+
+    let (status, report, body) = api.resume(&processor).await?;
+    if status != 200 {
+        return Err(format!("POST resume {processor}: {status} {body}"));
+    }
+    check_pause(&report, "resume", &expected)?;
+    wait_handled(peer, keys, languages, family, &ids, Duration::from_secs(60)).await?;
+    wait_processor(api, &processor, Duration::from_secs(15), |p| {
+        p.state == "RUNNING"
+    })
+    .await?;
+    Ok(format!(
+        "the hub paused {processor} on both instances ({} acknowledged) and resume delivered the events published while paused",
+        report.acknowledged
+    ))
+}
+
+/// A pause one language persists in the shared control store is read and obeyed by the other:
+/// Go writes it, Python's status becomes PAUSED, its consumer handles nothing, and the hub's
+/// resume releases both.
+async fn cross_pause_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    run: &str,
+) -> Res<String> {
+    let family = "mysql";
+    let processor = processor_name(family);
+    let owners = ready(peer, keys, languages, family, run).await?;
+    let (partition, owner) = owners
+        .iter()
+        .find(|(_, owner)| owner.language == "python")
+        .map(|(partition, owner)| (partition.clone(), owner.clone()))
+        .ok_or_else(|| format!("{family}: python never owned a partition"))?;
+    let key = key_on_partition(family, run, &partition, "cross-pause")?;
+    let id = format!("cross-pause-{run}");
+
+    let reply = control_set(peer, keys, &instance("go", family), family, run, true, "go").await?;
+    if reply.instance != instance("go", family)
+        || !reply.paused
+        || reply.paused_by.as_deref() != Some("go")
+    {
+        return Err(format!(
+            "the Go instance did not persist the pause: {reply:?}"
+        ));
+    }
+    let started = tokio::time::Instant::now();
+    let python = instance("python", family);
+    let mut last = String::from("not read yet");
+    loop {
+        let state = state(peer, keys, &python, &[]).await?;
+        if state.paused {
+            if state.paused_by.as_deref() != Some("go") {
+                return Err(format!(
+                    "{python} reads paused by {:?}, not by go",
+                    state.paused_by
+                ));
+            }
+            break;
+        }
+        if started.elapsed() >= Duration::from_secs(15) {
+            return Err(format!(
+                "{python} never read the pause Go persisted (last: {last})"
+            ));
+        }
+        last = format!("{} ms", started.elapsed().as_millis());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    wait_processor(api, &processor, Duration::from_secs(15), |p| {
+        p.state == "PAUSED"
+            && p.instance(&python)
+                .is_some_and(|i| i.report.state == "PAUSED")
+    })
+    .await
+    .map_err(|e| format!("after Go's pause: {e}"))?;
+    let converged = started.elapsed();
+
+    publish_raw(
+        peer,
+        keys,
+        &owner.instance,
+        run,
+        family,
+        "cross-pause",
+        std::slice::from_ref(&id),
+        std::slice::from_ref(&key),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let state = state(peer, keys, &python, &[]).await?;
+    if state.deliveries.iter().any(|delivery| delivery.id == id) {
+        return Err(format!(
+            "{python} delivered {id} while it read the pause Go persisted"
+        ));
+    }
+
+    let (status, report, body) = api.resume(&processor).await?;
+    if status != 200 {
+        return Err(format!("POST resume {processor}: {status} {body}"));
+    }
+    let expected: BTreeSet<String> = languages
+        .iter()
+        .map(|language| instance(language, family))
+        .collect();
+    check_pause(&report, "resume", &expected)?;
+    wait_handled(
+        peer,
+        keys,
+        languages,
+        family,
+        std::slice::from_ref(&id),
+        Duration::from_secs(60),
+    )
+    .await?;
+    Ok(format!(
+        "go's pause of {processor} reached python's status and consumer in {:.1}s, and the hub's resume delivered the event",
+        converged.as_secs_f64()
+    ))
+}
+
+/// The hub's leased reset on `language`'s instance: pause, reset to earliest, the status's replay
+/// flags and positions, resume, and the handlers' counts (the opt-out handler does not run again).
+async fn reset_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    language: &str,
+) -> Res<String> {
+    let processor = processor_name(family);
+    let executor = instance(language, family);
+    let expected: BTreeSet<String> = languages
+        .iter()
+        .map(|language| instance(language, family))
+        .collect();
+
+    let (status, report, body) = api.pause(&processor).await?;
+    if status != 200 {
+        return Err(format!("POST pause {processor}: {status} {body}"));
+    }
+    check_pause(&report, "pause", &expected)?;
+    wait_processor(api, &processor, Duration::from_secs(15), |p| {
+        p.state == "PAUSED"
+    })
+    .await?;
+
+    api.wait_freshest(&processor, &executor, 2_500, Duration::from_secs(30))
+        .await?;
+    let before = state(peer, keys, &executor, &[]).await?;
+
+    let (status, reset, body) = api.reset(&processor, json!("earliest")).await?;
+    if status != 200 {
+        return Err(format!("POST reset {processor}: {status} {body}"));
+    }
+    if reset.outcome != "ok"
+        || reset.executed_by.as_deref() != Some(executor.as_str())
+        || !reset.replay
+        || reset.ranges.is_empty()
+        || reset.markers_deleted == 0
+        || reset.reset_handlers != 1
+    {
+        return Err(format!(
+            "the hub's reset report is not the expected one (executor {executor}): {body}"
+        ));
+    }
+    for instance in &reset.instances {
+        if instance.prepare.result != "ok"
+            || instance
+                .finish
+                .as_ref()
+                .is_none_or(|finish| finish.result != "ok")
+        {
+            return Err(format!(
+                "{} did not prepare and finish the reset: {body}",
+                instance.instance_id
+            ));
+        }
+    }
+
+    let observed = wait_processor(api, &processor, Duration::from_secs(15), |p| {
+        p.state == "PAUSED"
+            && p.instance(&executor).is_some_and(|i| {
+                i.report.replaying
+                    && i.report
+                        .segments
+                        .iter()
+                        .any(|segment| !segment.replay_until.is_empty())
+            })
+    })
+    .await
+    .map_err(|e| format!("after the reset: {e}"))?;
+    let control = state(peer, keys, &executor, &[]).await?;
+    for range in &reset.ranges {
+        if !control.replay.iter().any(|open| {
+            open.segment == range.segment && open.from == range.from && open.until == range.until
+        }) {
+            return Err(format!(
+                "{executor}: its control state does not hold the reset's range {}:{}..{}: {:?}",
+                range.segment, range.from, range.until, control.replay
+            ));
+        }
+    }
+    let report = observed
+        .instance(&executor)
+        .ok_or_else(|| format!("the status lost {executor}"))?;
+    let mut replayed = 0usize;
+    for range in &reset.ranges {
+        let Some(segment) = report
+            .report
+            .segments
+            .iter()
+            .find(|segment| segment.segment == range.segment)
+        else {
+            continue;
+        };
+        if segment.replay_until != range.until {
+            return Err(format!(
+                "{executor}: segment {} replays until {:?}, not {:?}",
+                range.segment, segment.replay_until, range.until
+            ));
+        }
+        if segment.committed != range.from {
+            return Err(format!(
+                "{executor}: segment {} is committed at {:?}, not at the reset's {:?}",
+                range.segment, segment.committed, range.from
+            ));
+        }
+        replayed += 1;
+    }
+    if replayed == 0 {
+        return Err(format!(
+            "{executor}: none of the reset's segments is on the instance's status: {report:?}"
+        ));
+    }
+
+    let (status, report, body) = api.resume(&processor).await?;
+    if status != 200 {
+        return Err(format!("POST resume {processor}: {status} {body}"));
+    }
+    check_pause(&report, "resume", &expected)?;
+    wait_processor(api, &processor, Duration::from_secs(60), |p| !p.replaying)
+        .await
+        .map_err(|e| format!("while replaying: {e}"))?;
+    let after = state(peer, keys, &executor, &[]).await?;
+    if after.handled <= before.handled {
+        return Err(format!(
+            "{executor}: the replay added no handled delivery ({} before, {} after)",
+            before.handled, after.handled
+        ));
+    }
+    if after.opted_out != before.opted_out {
+        return Err(format!(
+            "{executor}: the replay ran the opt-out handler ({} before, {} after)",
+            before.opted_out, after.opted_out
+        ));
+    }
+    Ok(format!(
+        "the hub executed a paused reset of {processor} on {executor} ({} ranges, {} markers deleted, {} handler), replayed {} until {} after resume, and the opt-out handler did not run again",
+        reset.ranges.len(),
+        reset.markers_deleted,
+        reset.reset_handlers,
+        replayed,
+        reset
+            .ranges
+            .iter()
+            .map(|range| format!("{}:{}..{}", range.segment, range.from, range.until))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+/// A dead letter parked by `park` is retried by `retry` through the hub: the letter's process,
+/// the retry's instance, the marker and the delivery prove both languages share the store.
+#[allow(clippy::too_many_arguments)] // the scenario's inputs, all named at the call site
+async fn dead_letter_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    park: &str,
+    retry: &str,
+    run: &str,
+    tag: &str,
+) -> Res<String> {
+    let processor = processor_name(family);
+    let owners = ready(peer, keys, languages, family, run).await?;
+    let (partition, _) = owners
+        .iter()
+        .find(|(_, owner)| owner.language == park)
+        .map(|(partition, owner)| (partition.clone(), owner.clone()))
+        .ok_or_else(|| format!("{family}: {park} never owned a partition"))?;
+    let key = key_on_partition(family, run, &partition, tag)?;
+    let id = format!("dl-{run}-{family}-{tag}");
+    let reply = poison(
+        peer,
+        keys,
+        &instance(park, family),
+        family,
+        run,
+        park,
+        &id,
+        &key,
+    )
+    .await?;
+    if reply.published != id {
+        return Err(format!(
+            "{processor}: the poison event was not published: {reply:?}"
+        ));
+    }
+    let letter = wait_letter(peer, keys, languages, family, &id, Duration::from_secs(60)).await?;
+    if letter.reason != "HANDLER_FAILED"
+        || letter.event_id.as_deref() != Some(id.as_str())
+        || letter.attempts == 0
+    {
+        return Err(format!("{processor}: the parked letter is {letter:?}"));
+    }
+
+    allow(
+        peer,
+        keys,
+        languages,
+        family,
+        run,
+        std::slice::from_ref(&id),
+    )
+    .await?;
+    let retried = instance(retry, family);
+    api.wait_freshest(&processor, &retried, 1_500, Duration::from_secs(30))
+        .await?;
+    let (status, report, body) = api.retry(&processor, &letter.id).await?;
+    if status != 200 || report.result != "Retried" || report.instance_id != retried {
+        return Err(format!(
+            "POST retry {} as {retried}: {status} {body}",
+            letter.id
+        ));
+    }
+
+    let started = tokio::time::Instant::now();
+    loop {
+        let observed = states(peer, keys, languages, family, std::slice::from_ref(&id)).await?;
+        let gone = observed.iter().all(|state| {
+            !state
+                .dead_letters
+                .iter()
+                .any(|letter| letter.id == report.letter_id)
+                && state.dead_letter_total == 0
+        });
+        let handled = observed.iter().any(|state| {
             state
                 .deliveries
                 .iter()
-                .filter(|delivery| delivery.id == id)
-                .map(move |delivery| (state, delivery))
-        })
-        .collect()
+                .any(|delivery| delivery.id == id && delivery.outcome == "handled")
+        });
+        let marked = observed
+            .iter()
+            .all(|state| state.markers.get(&id) == Some(&true));
+        if gone && handled && marked {
+            return Ok(format!(
+                "{park} parked a letter on {family} and the hub retried it on {retried}: {id}"
+            ));
+        }
+        if started.elapsed() >= Duration::from_secs(60) {
+            return Err(format!(
+                "{processor}: the retried letter {id} is gone {gone}, handled {handled}, marked {marked}: {observed:?}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// `retry-all` retries every letter of the processor; a handler that fails again leaves both in
+/// place, and `DELETE` discards them: the hub's counts and the store's emptiness are asserted.
+async fn retry_all_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    run: &str,
+) -> Res<String> {
+    let family = "mongo";
+    let processor = processor_name(family);
+    let owners = ready(peer, keys, languages, family, run).await?;
+    let mut ids = Vec::new();
+    let mut partitions: Vec<String> = owners.keys().cloned().collect();
+    partitions.sort();
+    for (index, partition) in partitions.iter().enumerate() {
+        let key = key_on_partition(family, run, partition, &format!("retry-all-{index}"))?;
+        let id = format!("retry-all-{run}-{index}");
+        let publisher = owners
+            .get(partition)
+            .map(|owner| owner.language.clone())
+            .unwrap_or_else(|| "go".to_string());
+        poison(
+            peer,
+            keys,
+            &instance(&publisher, family),
+            family,
+            run,
+            &publisher,
+            &id,
+            &key,
+        )
+        .await?;
+        ids.push(id);
+    }
+    let mut letters = Vec::new();
+    for id in &ids {
+        letters
+            .push(wait_letter(peer, keys, languages, family, id, Duration::from_secs(60)).await?);
+    }
+    let (status, report, body) = api.retry_all(&processor).await?;
+    if status != 200
+        || report.retried != 0
+        || report.failed != ids.len() as u32
+        || report.blocked != 0
+        || report.skipped != 0
+    {
+        return Err(format!("POST retry-all {processor}: {status} {body}"));
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let observed = states(peer, keys, languages, family, &[]).await?;
+    for state in &observed {
+        if state.dead_letter_total != ids.len() as i64 {
+            return Err(format!(
+                "{}: retry-all left {} letters, expected {}",
+                state.instance,
+                state.dead_letter_total,
+                ids.len()
+            ));
+        }
+    }
+    for id in &ids {
+        if !observed.iter().any(|state| {
+            state
+                .dead_letters
+                .iter()
+                .any(|letter| letter.event_id.as_deref() == Some(id.as_str()))
+        }) {
+            return Err(format!("{processor}: retry-all lost the letter of {id}"));
+        }
+    }
+    for letter in &letters {
+        let (status, report, body) = api.discard(&processor, &letter.id).await?;
+        if status != 200 || !report.discarded {
+            return Err(format!("DELETE {}: {status} {body}", letter.id));
+        }
+    }
+    let observed = states(peer, keys, languages, family, &[]).await?;
+    if let Some(state) = observed
+        .iter()
+        .find(|state| !state.dead_letters.is_empty() || state.dead_letter_total != 0)
+    {
+        return Err(format!(
+            "{processor}: the discarded letters are still listed on {}: {:?}",
+            state.instance, state.dead_letters
+        ));
+    }
+    Ok(format!(
+        "retry-all retried {} letters on {processor} ({} failed again and stayed) and discard removed them",
+        ids.len(),
+        report.failed
+    ))
+}
+
+/// The RabbitMQ processor uses the event-store dead-letter mode: a record no handler can take is
+/// published to `<source>.dlt` with the six `snodra-dlt-*` headers and keyed payload, and the hub
+/// lists no collection letter for it.
+async fn dlt_scenario(
+    api: &Api,
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    run: &str,
+) -> Res<String> {
+    let family = "rabbitmq";
+    let processor = processor_name(family);
+    let owner = state(peer, keys, &instance(&languages[0], family), &[])
+        .await?
+        .instance;
+    let key = key_on_partition(family, run, "0", "dlt")?;
+    let id = format!("dlt-{run}");
+    poison(peer, keys, &owner, family, run, &languages[0], &id, &key).await?;
+
+    let started = tokio::time::Instant::now();
+    let mut last = String::from("no dead-letter event");
+    loop {
+        let observed = states(peer, keys, languages, family, &[]).await?;
+        if let Some((state, event)) = observed.iter().find_map(|state| {
+            state
+                .dlt
+                .iter()
+                .find(|event| event.id == id)
+                .map(|event| (state, event))
+        }) {
+            let topic = source_name(run, family);
+            let expected = [
+                ("snodra-dlt-processor", processor.as_str()),
+                ("snodra-dlt-reason", "HANDLER_FAILED"),
+                ("snodra-dlt-original-topic", topic.as_str()),
+            ];
+            for (name, want) in expected {
+                if event.headers.get(name).map(String::as_str) != Some(want) {
+                    return Err(format!(
+                        "{processor}: the dead-letter event's {name} is {:?}, not {want:?}: {:?}",
+                        event.headers.get(name),
+                        event.headers
+                    ));
+                }
+            }
+            for name in [
+                "snodra-dlt-error",
+                "snodra-dlt-original-partition",
+                "snodra-dlt-original-offset",
+            ] {
+                if event.headers.get(name).is_none_or(|value| value.is_empty()) {
+                    return Err(format!(
+                        "{processor}: the dead-letter event has no {name}: {:?}",
+                        event.headers
+                    ));
+                }
+            }
+            if event.type_name != EVENT_TYPE {
+                return Err(format!(
+                    "{processor}: the dead-letter event's type is {:?}",
+                    event.type_name
+                ));
+            }
+            if event.key.as_deref() != Some(key.as_str()) {
+                return Err(format!(
+                    "{processor}: the dead-letter event's key is {:?}, not {key:?}",
+                    event.key
+                ));
+            }
+            if event.payload.get("id").and_then(|v| v.as_str()) != Some(id.as_str()) {
+                return Err(format!(
+                    "{processor}: the dead-letter event's payload is {:?}",
+                    event.payload
+                ));
+            }
+            let (_, letters) = api.letters(&processor, 50).await?;
+            if letters.get("code").and_then(|v| v.as_str()) != Some("INVALID") {
+                return Err(format!(
+                    "{processor}: the hub lists dead letters in event-store mode: {letters}"
+                ));
+            }
+            if state
+                .dead_letters
+                .iter()
+                .any(|letter| letter.event_id.as_deref() == Some(id.as_str()))
+            {
+                return Err(format!(
+                    "{processor}: the event is also a collection letter on {}",
+                    state.instance
+                ));
+            }
+            if state.dlt_total == 0 {
+                return Err(format!(
+                    "{}: the dead-letter event is listed but the count is 0",
+                    state.instance
+                ));
+            }
+            return Ok(format!(
+                "{processor} published {id} to its dead-letter source ({} bytes on {}:{}), with the six snodra-dlt-* headers, and the hub keeps no collection letter",
+                event.payload.to_string().len(),
+                event.segment,
+                event.position
+            ));
+        }
+        if started.elapsed() >= Duration::from_secs(90) {
+            return Err(format!(
+                "{processor}: no dead-letter event for {id} arrived ({last})"
+            ));
+        }
+        last = format!("{} states read", observed.len());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// The RabbitMQ broker has no management API, so its event store does not declare replay: the hub
+/// refuses the reset before asking any instance and names the capability.
+async fn reset_unsupported_scenario(api: &Api) -> Res<String> {
+    let processor = processor_name("rabbitmq");
+    let (status, _, body) = api.reset(&processor, json!("earliest")).await?;
+    if status != 409 || body.get("code").and_then(|v| v.as_str()) != Some("UNSUPPORTED") {
+        return Err(format!("POST reset {processor}: {status} {body}"));
+    }
+    Ok(format!(
+        "the hub refused the reset of {processor} with 409 UNSUPPORTED: {}",
+        body.get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+    ))
+}
+
+/// The expected instances and results of a pause or resume report.
+fn check_pause(
+    report: &crate::hub::PauseReport,
+    action: &str,
+    expected: &BTreeSet<String>,
+) -> Res<()> {
+    if report.action != action || report.acknowledged != expected.len() as u32 || report.failed != 0
+    {
+        return Err(format!("the {action} report is {report:?}"));
+    }
+    let got: BTreeSet<&str> = report
+        .instances
+        .iter()
+        .map(|i| i.instance_id.as_str())
+        .collect();
+    if got != expected.iter().map(String::as_str).collect() {
+        return Err(format!(
+            "the {action} report names {got:?}, expected {expected:?}"
+        ));
+    }
+    for instance in &report.instances {
+        if instance.result != "ok" {
+            return Err(format!(
+                "{} answered {} to {action}: {:?}",
+                instance.instance_id, instance.result, instance.message
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Waits for the processor's aggregate to satisfy `ok`.
+async fn wait_processor(
+    api: &Api,
+    processor: &str,
+    limit: Duration,
+    ok: impl Fn(&crate::hub::ProcessorAggregate) -> bool,
+) -> Res<crate::hub::ProcessorAggregate> {
+    let deadline = tokio::time::Instant::now() + limit;
+    let mut last = String::new();
+    loop {
+        let aggregate = api.processor(crate::hub::SERVICE, processor).await?;
+        if ok(&aggregate) {
+            return Ok(aggregate);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{processor} did not reach the expected state within {limit:?} (last {last:?})"
+            ));
+        }
+        last = format!("{:?}", aggregate.state);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// Writes a pause or resume directly into the shared control store through one instance's probe
+/// command: the other language's instance reads it on its own poll.
+async fn control_set(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    instance: &str,
+    family: &str,
+    run: &str,
+    paused: bool,
+    by: &str,
+) -> Res<ControlReply> {
+    let key = keys
+        .get(instance)
+        .ok_or_else(|| format!("no routing key for {instance}"))?;
+    let reply = call(
+        peer,
+        command(
+            "orders.interop.ControlSet",
+            Some(key),
+            json!({"family": family, "run": run, "paused": paused, "by": by}),
+        ),
+    )
+    .await?;
+    let reply: ControlReply = serde_json::from_value(reply)
+        .map_err(|e| format!("{instance}: ControlSet answered something else: {e}"))?;
+    if reply.instance != instance {
+        return Err(format!(
+            "ControlSet for {instance} reached {}: the membership moved",
+            reply.instance
+        ));
+    }
+    Ok(reply)
+}
+
+/// Publishes one poison event through an instance's event store.
+#[allow(clippy::too_many_arguments)] // the scenario's inputs, all named at the call site
+async fn poison(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    instance: &str,
+    family: &str,
+    run: &str,
+    publisher: &str,
+    id: &str,
+    key: &str,
+) -> Res<PoisonReply> {
+    let routing = keys
+        .get(instance)
+        .ok_or_else(|| format!("no routing key for {instance}"))?;
+    let reply = call(
+        peer,
+        command(
+            "orders.interop.Poison",
+            Some(routing),
+            json!({
+                "family": family,
+                "publisher": publisher,
+                "run": run,
+                "id": id,
+                "key": key,
+            }),
+        ),
+    )
+    .await?;
+    let reply: PoisonReply = serde_json::from_value(reply)
+        .map_err(|e| format!("{instance}: Poison answered something else: {e}"))?;
+    if reply.instance != instance {
+        return Err(format!(
+            "Poison for {instance} reached {}: the membership moved",
+            reply.instance
+        ));
+    }
+    Ok(reply)
+}
+
+/// Lets the poison ids through on every instance of the family, so whichever the hub picks for a
+/// retry can handle the record.
+async fn allow(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    run: &str,
+    ids: &[String],
+) -> Res<()> {
+    for language in languages {
+        let instance = instance(language, family);
+        let routing = keys
+            .get(&instance)
+            .ok_or_else(|| format!("no routing key for {instance}"))?;
+        let reply = call(
+            peer,
+            command(
+                "orders.interop.Allow",
+                Some(routing),
+                json!({"family": family, "run": run, "ids": ids}),
+            ),
+        )
+        .await?;
+        let reply: AllowReply = serde_json::from_value(reply)
+            .map_err(|e| format!("{instance}: Allow answered something else: {e}"))?;
+        if reply.instance != instance || reply.allowed == 0 {
+            return Err(format!("{instance}: Allow did not take the ids: {reply:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// Waits until every instance lists the letter of `event_id`.
+async fn wait_letter(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    event_id: &str,
+    limit: Duration,
+) -> Res<LetterBrief> {
+    let deadline = tokio::time::Instant::now() + limit;
+    let mut last = String::from("no letter");
+    loop {
+        let observed = states(peer, keys, languages, family, &[]).await?;
+        let mut found: Option<LetterBrief> = None;
+        let mut seen = 0usize;
+        for state in &observed {
+            if let Some(letter) = state
+                .dead_letters
+                .iter()
+                .find(|letter| letter.event_id.as_deref() == Some(event_id))
+            {
+                seen += 1;
+                found = Some(letter.clone());
+                last = format!("{} lists {}", state.instance, letter.id);
+            }
+        }
+        if let (Some(letter), true) = (found, seen == observed.len()) {
+            return Ok(letter);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{family}: no every-instance letter for {event_id} within {limit:?} ({last})"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// Waits until every id has a handled delivery on some instance.
+async fn wait_handled(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    ids: &[String],
+    limit: Duration,
+) -> Res<()> {
+    let deadline = tokio::time::Instant::now() + limit;
+    let mut last = 0usize;
+    loop {
+        let observed = states(peer, keys, languages, family, &[]).await?;
+        let handled = ids
+            .iter()
+            .filter(|id| {
+                observed.iter().any(|state| {
+                    state
+                        .deliveries
+                        .iter()
+                        .any(|delivery| &delivery.id == *id && delivery.outcome == "handled")
+                })
+            })
+            .count();
+        if handled == ids.len() {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{family}: {last}/{} events were handled within {limit:?}",
+                ids.len()
+            ));
+        }
+        last = handled;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 /// Whether every event's marker is visible where the store shares it: on the handling instance
@@ -847,6 +1968,20 @@ fn markers_visible(family: &str, observed: &[StateReply], ids: &[String]) -> boo
         }
     }
     true
+}
+
+/// Every delivery of one event across the instances.
+fn deliveries_of<'a>(observed: &'a [StateReply], id: &str) -> Vec<(&'a StateReply, &'a Delivery)> {
+    observed
+        .iter()
+        .flat_map(|state| {
+            state
+                .deliveries
+                .iter()
+                .filter(|delivery| delivery.id == id)
+                .map(move |delivery| (state, delivery))
+        })
+        .collect()
 }
 
 /// The Kafka default partitioner's murmur2, as the Java client has it: a signed 32-bit value
