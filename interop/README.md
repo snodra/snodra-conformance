@@ -122,32 +122,40 @@ The driver asserts, and prints one `ok` line per scenario; every one is required
 6. **Pause and resume through the hub.** `POST …/pause` acknowledges both instances; the status turns
    `PAUSED`; events published while paused are not handled; `POST …/resume` acknowledges both and the
    paused events are delivered. The hub's report, not a probe's guess, is asserted.
-7. **A pause set by one language, obeyed by the other.** Go writes `paused = true` (by `go`) into the
-   shared control store; Python's state reads `pausedBy: go` on its own poll, its status becomes
-   `PAUSED`, and an event published meanwhile is not handled. The hub's resume releases both.
-8. **Reset and replay on a Go and on a Python service.** The processor is paused, then
-   `POST …/reset {"to":"earliest"}` is called with the desired instance's report the freshest (the hub
-   executes on that instance): the report names it as `executedBy`, every instance prepares and
-   finishes, the ranges, deleted markers and the reset handler are counted, the status reports
-   `replaying` with the reset's `replayUntil`, the committed positions moved to each range's `from`,
-   and after `POST …/resume` the replay closes while the normal handler runs again and the
-   `@DisallowReplay`/`replay=False` handler does not.
-9. **A dead letter parked by one language, retried by the other.** Go's handler rejects an event on
-   its partition on PostgreSQL; both languages list the `HANDLER_FAILED` letter in the shared store;
-   both instances are allowed the id, the hub's retry goes to the freshest instance, and the response
-   names the Python instance, `Retried`; the letter is gone, the marker is visible to both and Python's
-   handler recorded the delivery.
-10. **Retry on the parking language.** The same on MySQL (Go parks and Go retries) and on MongoDB
-    (Python parks and Python retries), so the hub's retry is proved on each language by itself.
-11. **`retry-all` and discard.** Two failing letters on MongoDB are retried in one call: the hub
-    reports `failed: 2`, both stay, and `DELETE` removes each; the store lists none afterwards.
-12. **The event-store dead-letter mode end to end.** The RabbitMQ processor runs in mode
+7. **A pause Go persists, obeyed by Python.** Go writes `paused = true` (by `go`) into MySQL's shared
+   control store; Python's state reads `pausedBy: go` on its own poll, its status becomes `PAUSED`,
+   and an event published meanwhile is not handled. The hub's resume releases both.
+8. **A pause Python persists, obeyed by Go.** The reverse on MongoDB: Python writes `paused = true`
+   (by `python`), Go's state reads `pausedBy: python`, its status becomes `PAUSED` and it handles
+   nothing until the hub's resume.
+9. **Reset and replay on Go.** The processor is paused, then `POST …/reset {"to":"earliest"}` is
+   called with the Go instance's report the freshest (the hub executes on it): the report names
+   `go-postgres` as `executedBy`, both instances prepare and finish, the ranges, deleted markers and
+   the reset handler are counted, the status reports `replaying` with each range's `replayUntil`, the
+   committed positions moved to each range's `from`, and after `POST …/resume` the replay closes while
+   the normal handler runs again and the `@DisallowReplay` handler does not.
+10. **Reset and replay on Python.** The same on MySQL with `python-mysql` as the executor and the
+    `replay=False` handler's count unchanged.
+11. **A dead letter parked by Go, retried by Python.** Go's handler rejects an event on its PostgreSQL
+    partition; both languages list the `HANDLER_FAILED` letter in the shared store; both instances
+    are allowed the id, the hub's retry goes to the freshest instance, and the response names the
+    Python instance, `Retried`; the letter is gone, the marker is visible to both, the retried
+    instance recorded the delivery, and the parking instance still has the marker.
+12. **A dead letter parked by Python, retried by Go.** The reverse on MongoDB: Python parks, Go
+    retries, and the same assertions hold with the languages swapped.
+13. **Retry on the parking language.** Two scenarios: MySQL (Go parks and Go retries) and MongoDB
+    (Python parks and Python retries), so the hub's retry is proved on each language by itself as
+    well as across.
+14. **`retry-all` and discard.** Two failing letters on MongoDB are retried in one call: the hub
+    reports `failed: 2`, both stay, and `DELETE` removes each; the store's real count is zero
+    afterwards.
+15. **The event-store dead-letter mode end to end.** The RabbitMQ processor runs in mode
     `event-store`; a record no handler takes is published to `<source>.dlt`, the probe's subscription
     receives it with its key and payload and the six `snodra-dlt-*` headers, and the hub's
     dead-letter call answers `400 INVALID` because there is no collection to list.
-13. **A capability the hub refuses.** The RabbitMQ broker has no management API, so the event store
-    declares no replay: `POST …/reset` answers `409 UNSUPPORTED` naming the event store before any
-    instance is asked.
+16. **A capability the hub refuses.** The RabbitMQ broker has no management API, so the event store
+    declares no replay: `POST …/reset` answers `409 UNSUPPORTED` naming
+    `rabbitmq-streams`, with no instance asked and no operation executed.
 
 Names carry a run token generated by `run.sh`: the sources are
 `snodra.interop.<run>.<family>`, the shared databases `snodra_interop_<run>`, and every topic and
@@ -155,18 +163,22 @@ super stream has two partitions (one per language). `INTEROP_RUN` overrides the 
 reads:
 
 ```text
-stores: 2 languages, 19 scenarios passed across kafka,rabbitmq,postgres,mysql,mongo, run <token>
+stores: 2 languages, 21 scenarios passed across kafka,rabbitmq,postgres,mysql,mongo, run <token>
 ```
+
+`INTEROP_STRICT=1` is accepted for the harness's contract; every stores scenario is required, so it
+changes nothing there.
 
 The two probe processes run one App per family on the library's public API, with the real outbox,
 relay, event consumer, event store and message store add-ons. `images/store-go` and
 `images/store-python` build them from `GO_REF` / `PYTHON_REF` (the released tags `v0.5.1` and
-`v0.6.0`), or from `GO_SRC` / `PYTHON_SRC`. The processor-control scenarios need the local
-checkouts: the released refs answer the level-2 probe commands only. The Python probe reports its
-status every 4 s (the Go one keeps the 5 s default), so the two report phases drift and the driver
-can wait for either language to be the freshest instance the hub picks for a reset or a dead-letter
-call. `run.sh` stops every container and anonymous volume it started; the topics, streams and
-databases live only in those containers, so a finished run leaves nothing behind.
+`v0.6.0`), or from `GO_SRC` / `PYTHON_SRC`. The stores profile **requires** the local checkouts:
+`run.sh` exits 2 when either is unset, because the released refs answer the level-2 probe commands
+only. The Python probe reports its status every 4 s (the Go one keeps the 5 s default), so the two
+report phases drift and the driver can wait for either language to be the freshest instance the hub
+picks for a reset or a dead-letter call. `run.sh` stops every container and anonymous volume it
+started; the topics, streams and databases live only in those containers, so a finished run leaves
+nothing behind.
 
 ## Known limits
 
@@ -178,10 +190,10 @@ databases live only in those containers, so a finished run leaves nothing behind
   language), so four languages need four partitions and the "each language reads the other's events"
   assertions become per pair. The scenarios keep their shape.
 
-- **The control scenarios need local checkouts.** The released Go and Python tags carry the level-2
-  probe only: `ControlSet`, `Poison` and `Allow` arrive with the processor-control work. Until a
-  release carries them, run the profile with `GO_SRC` and `PYTHON_SRC`; the harness warns when they
-  are unset, and the control scenarios fail at the first unknown command instead of being skipped.
+- **The stores profile requires local checkouts.** The released Go and Python tags carry the level-2
+  probe only: `ControlSet`, `Poison` and `Allow` arrive with the processor-control work.
+  `run.sh --profile stores` exits 2 when `GO_SRC` or `PYTHON_SRC` is unset rather than building the
+  released refs and failing at the first unknown command.
 
 - **The event-store dead-letter mode is proved on RabbitMQ.** The `rabbitmq` family publishes to its
   `.dlt` super stream and the probe subscribes there; the Kafka families stay in `collection` mode, so

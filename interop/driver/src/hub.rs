@@ -227,14 +227,20 @@ pub struct DiscardReport {
 }
 
 impl Api {
-    /// The API of the hub at `host:port`, with the harness's write credential.
+    /// The API of the hub at `host:port`, with the harness's write credential. Every call is
+    /// bounded: a hub that stops answering must not hang the driver (a reset may take minutes, so
+    /// the bound is generous).
     pub fn new(hub: &str) -> Self {
         let token =
             std::env::var(WRITE_TOKEN_ENV).unwrap_or_else(|_| DEFAULT_WRITE_TOKEN.to_string());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap_or_default();
         Self {
             base: format!("http://{hub}"),
             token,
-            client: reqwest::Client::new(),
+            client,
         }
     }
 

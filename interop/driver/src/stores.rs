@@ -42,10 +42,11 @@ const PARTITIONS: usize = 2;
 const LANGUAGES: [&str; 2] = ["go", "python"];
 /// The event type the probes publish.
 const EVENT_TYPE: &str = "orders.OrderPlaced";
-/// The level-3 control scenarios after the eight level-2 ones: status, pause, a pause set in one
-/// language seen by the other, two resets, three dead-letter retries, retry-all and discard, the
-/// event-store dead-letter mode, and a reset the hub refuses for the missing capability.
-const L3_SCENARIOS: usize = 11;
+/// The level-3 control scenarios after the eight level-2 ones: status, hub pause, a pause each
+/// language persists and the other obeys, two resets, four dead-letter retries (both cross
+/// directions and each language alone), retry-all and discard, the event-store dead-letter mode,
+/// and a reset the hub refuses for the missing capability.
+const L3_SCENARIOS: usize = 13;
 
 #[derive(ClapArgs)]
 pub struct StoresArgs {
@@ -61,7 +62,8 @@ pub struct StoresArgs {
     /// The run token the harness generated; every source and database name carries it
     #[arg(long)]
     run: String,
-    /// Exit non-zero when a scenario could not be exercised (all of them are required here)
+    /// Accepted because the harness passes it to both profiles; every scenario of the stores
+    /// profile is required, so it changes nothing
     #[arg(long)]
     strict: bool,
 }
@@ -342,7 +344,17 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
     println!("ok   pause: {line}");
     scenarios += 1;
 
-    let line = cross_pause_scenario(&api, &peer, &keys, &languages, &args.run).await?;
+    let line = cross_pause_scenario(
+        &api, &peer, &keys, &languages, &args.run, "mysql", "go", "python",
+    )
+    .await?;
+    println!("ok   pause: {line}");
+    scenarios += 1;
+
+    let line = cross_pause_scenario(
+        &api, &peer, &keys, &languages, &args.run, "mongo", "python", "go",
+    )
+    .await?;
     println!("ok   pause: {line}");
     scenarios += 1;
 
@@ -354,6 +366,7 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
 
     for (family, park, retry, tag) in [
         ("postgres", "go", "python", "cross"),
+        ("mongo", "python", "go", "cross-reverse"),
         ("mysql", "go", "go", "go"),
         ("mongo", "python", "python", "python"),
     ] {
@@ -1090,20 +1103,9 @@ async fn pause_scenario(
         &partitions,
     )
     .await?;
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let observed = states(peer, keys, languages, family, &[]).await?;
-    if let Some((state, delivery)) = observed.iter().find_map(|state| {
-        state
-            .deliveries
-            .iter()
-            .find(|delivery| ids.contains(&delivery.id))
-            .map(|delivery| (state, delivery))
-    }) {
-        return Err(format!(
-            "the paused {} still delivered {} ({:?})",
-            state.instance, delivery.id, delivery.outcome
-        ));
-    }
+    assert_not_delivered(peer, keys, languages, family, &ids, Duration::from_secs(3))
+        .await
+        .map_err(|e| format!("a paused instance {e}"))?;
 
     let (status, report, body) = api.resume(&processor).await?;
     if status != 200 {
@@ -1122,44 +1124,56 @@ async fn pause_scenario(
 }
 
 /// A pause one language persists in the shared control store is read and obeyed by the other:
-/// Go writes it, Python's status becomes PAUSED, its consumer handles nothing, and the hub's
-/// resume releases both.
+/// `writer`'s probe writes it, `observer`'s status becomes PAUSED, its consumer handles nothing,
+/// and the hub's resume releases both. The event is keyed to a partition `observer` owns.
+#[allow(clippy::too_many_arguments)] // the scenario's inputs, all named at the call site
 async fn cross_pause_scenario(
     api: &Api,
     peer: &Peer,
     keys: &BTreeMap<String, String>,
     languages: &[String],
     run: &str,
+    family: &str,
+    writer: &str,
+    observer: &str,
 ) -> Res<String> {
-    let family = "mysql";
     let processor = processor_name(family);
     let owners = ready(peer, keys, languages, family, run).await?;
     let (partition, owner) = owners
         .iter()
-        .find(|(_, owner)| owner.language == "python")
+        .find(|(_, owner)| owner.language == observer)
         .map(|(partition, owner)| (partition.clone(), owner.clone()))
-        .ok_or_else(|| format!("{family}: python never owned a partition"))?;
-    let key = key_on_partition(family, run, &partition, "cross-pause")?;
-    let id = format!("cross-pause-{run}");
+        .ok_or_else(|| format!("{family}: {observer} never owned a partition"))?;
+    let key = key_on_partition(family, run, &partition, &format!("cross-pause-{writer}"))?;
+    let id = format!("cross-pause-{run}-{writer}");
 
-    let reply = control_set(peer, keys, &instance("go", family), family, run, true, "go").await?;
-    if reply.instance != instance("go", family)
+    let reply = control_set(
+        peer,
+        keys,
+        &instance(writer, family),
+        family,
+        run,
+        true,
+        writer,
+    )
+    .await?;
+    if reply.instance != instance(writer, family)
         || !reply.paused
-        || reply.paused_by.as_deref() != Some("go")
+        || reply.paused_by.as_deref() != Some(writer)
     {
         return Err(format!(
-            "the Go instance did not persist the pause: {reply:?}"
+            "the {writer} instance did not persist the pause: {reply:?}"
         ));
     }
     let started = tokio::time::Instant::now();
-    let python = instance("python", family);
+    let observed = instance(observer, family);
     let mut last = String::from("not read yet");
     loop {
-        let state = state(peer, keys, &python, &[]).await?;
+        let state = state(peer, keys, &observed, &[]).await?;
         if state.paused {
-            if state.paused_by.as_deref() != Some("go") {
+            if state.paused_by.as_deref() != Some(writer) {
                 return Err(format!(
-                    "{python} reads paused by {:?}, not by go",
+                    "{observed} reads paused by {:?}, not by {writer}",
                     state.paused_by
                 ));
             }
@@ -1167,7 +1181,7 @@ async fn cross_pause_scenario(
         }
         if started.elapsed() >= Duration::from_secs(15) {
             return Err(format!(
-                "{python} never read the pause Go persisted (last: {last})"
+                "{observed} never read the pause {writer} persisted (last: {last})"
             ));
         }
         last = format!("{} ms", started.elapsed().as_millis());
@@ -1175,11 +1189,11 @@ async fn cross_pause_scenario(
     }
     wait_processor(api, &processor, Duration::from_secs(15), |p| {
         p.state == "PAUSED"
-            && p.instance(&python)
+            && p.instance(&observed)
                 .is_some_and(|i| i.report.state == "PAUSED")
     })
     .await
-    .map_err(|e| format!("after Go's pause: {e}"))?;
+    .map_err(|e| format!("after {writer}'s pause: {e}"))?;
     let converged = started.elapsed();
 
     publish_raw(
@@ -1193,13 +1207,16 @@ async fn cross_pause_scenario(
         std::slice::from_ref(&key),
     )
     .await?;
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let state = state(peer, keys, &python, &[]).await?;
-    if state.deliveries.iter().any(|delivery| delivery.id == id) {
-        return Err(format!(
-            "{python} delivered {id} while it read the pause Go persisted"
-        ));
-    }
+    assert_not_delivered(
+        peer,
+        keys,
+        languages,
+        family,
+        std::slice::from_ref(&id),
+        Duration::from_secs(3),
+    )
+    .await
+    .map_err(|e| format!("{observed} while paused: {e}"))?;
 
     let (status, report, body) = api.resume(&processor).await?;
     if status != 200 {
@@ -1220,7 +1237,7 @@ async fn cross_pause_scenario(
     )
     .await?;
     Ok(format!(
-        "go's pause of {processor} reached python's status and consumer in {:.1}s, and the hub's resume delivered the event",
+        "{writer}'s pause of {processor} reached {observer}'s status and consumer in {:.1}s, and the hub's resume delivered the event",
         converged.as_secs_f64()
     ))
 }
@@ -1254,7 +1271,21 @@ async fn reset_scenario(
 
     api.wait_freshest(&processor, &executor, 2_500, Duration::from_secs(30))
         .await?;
-    let before = state(peer, keys, &executor, &[]).await?;
+    let before = states(peer, keys, languages, family, &[]).await?;
+    let before_executor = before
+        .iter()
+        .find(|state| state.instance == executor)
+        .ok_or_else(|| format!("the executor {executor} is not in the state replies"))?;
+    let before_other = before
+        .iter()
+        .find(|state| state.instance != executor)
+        .ok_or_else(|| format!("only {executor} answered the state"))?;
+    if before_executor.opted_out == 0 || before_other.opted_out == 0 {
+        return Err(format!(
+            "the opt-out handler's counts are {} and {}: the replay assertion would be vacuous",
+            before_executor.opted_out, before_other.opted_out
+        ));
+    }
 
     let (status, reset, body) = api.reset(&processor, json!("earliest")).await?;
     if status != 200 {
@@ -1284,6 +1315,16 @@ async fn reset_scenario(
             ));
         }
     }
+    let prepared: BTreeSet<&str> = reset
+        .instances
+        .iter()
+        .map(|instance| instance.instance_id.as_str())
+        .collect();
+    if prepared.is_empty() || prepared != expected.iter().map(String::as_str).collect() {
+        return Err(format!(
+            "the reset report names {prepared:?}, expected {expected:?}: {body}"
+        ));
+    }
 
     let observed = wait_processor(api, &processor, Duration::from_secs(15), |p| {
         p.state == "PAUSED"
@@ -1293,6 +1334,13 @@ async fn reset_scenario(
                         .segments
                         .iter()
                         .any(|segment| !segment.replay_until.is_empty())
+            })
+            && reset.ranges.iter().all(|range| {
+                p.instances.iter().any(|instance| {
+                    instance.report.segments.iter().any(|segment| {
+                        segment.segment == range.segment && segment.replay_until == range.until
+                    })
+                })
             })
     })
     .await
@@ -1308,36 +1356,45 @@ async fn reset_scenario(
             ));
         }
     }
-    let report = observed
-        .instance(&executor)
-        .ok_or_else(|| format!("the status lost {executor}"))?;
     let mut replayed = 0usize;
     for range in &reset.ranges {
-        let Some(segment) = report
-            .report
-            .segments
-            .iter()
-            .find(|segment| segment.segment == range.segment)
-        else {
-            continue;
-        };
-        if segment.replay_until != range.until {
-            return Err(format!(
-                "{executor}: segment {} replays until {:?}, not {:?}",
-                range.segment, segment.replay_until, range.until
-            ));
+        let mut checked = false;
+        for instance in &observed.instances {
+            let Some(segment) = instance
+                .report
+                .segments
+                .iter()
+                .find(|segment| segment.segment == range.segment)
+            else {
+                continue;
+            };
+            checked = true;
+            if segment.replay_until != range.until {
+                return Err(format!(
+                    "{}: segment {} replays until {:?}, not {:?}",
+                    instance.instance_id, range.segment, segment.replay_until, range.until
+                ));
+            }
+            if instance.instance_id == executor && segment.committed != range.from {
+                return Err(format!(
+                    "{executor}: segment {} is committed at {:?}, not at the reset's {:?}",
+                    range.segment, segment.committed, range.from
+                ));
+            }
+            break;
         }
-        if segment.committed != range.from {
+        if !checked {
             return Err(format!(
-                "{executor}: segment {} is committed at {:?}, not at the reset's {:?}",
-                range.segment, segment.committed, range.from
+                "{executor}: no instance's status holds the reset's segment {}: {observed:?}",
+                range.segment
             ));
         }
         replayed += 1;
     }
-    if replayed == 0 {
+    if replayed != reset.ranges.len() {
         return Err(format!(
-            "{executor}: none of the reset's segments is on the instance's status: {report:?}"
+            "{executor}: {replayed} of {} reset ranges are reflected in the status",
+            reset.ranges.len()
         ));
     }
 
@@ -1349,18 +1406,31 @@ async fn reset_scenario(
     wait_processor(api, &processor, Duration::from_secs(60), |p| !p.replaying)
         .await
         .map_err(|e| format!("while replaying: {e}"))?;
-    let after = state(peer, keys, &executor, &[]).await?;
-    if after.handled <= before.handled {
+    let after = states(peer, keys, languages, family, &[]).await?;
+    let after_executor = after
+        .iter()
+        .find(|state| state.instance == executor)
+        .ok_or_else(|| format!("the executor {executor} is not in the state replies"))?;
+    let after_other = after
+        .iter()
+        .find(|state| state.instance != executor)
+        .ok_or_else(|| format!("only {executor} answered the state"))?;
+    if after_executor.handled <= before_executor.handled {
         return Err(format!(
             "{executor}: the replay added no handled delivery ({} before, {} after)",
-            before.handled, after.handled
+            before_executor.handled, after_executor.handled
         ));
     }
-    if after.opted_out != before.opted_out {
-        return Err(format!(
-            "{executor}: the replay ran the opt-out handler ({} before, {} after)",
-            before.opted_out, after.opted_out
-        ));
+    for (stage, state, previous) in [
+        ("executor", after_executor, before_executor),
+        ("other instance", after_other, before_other),
+    ] {
+        if state.opted_out != previous.opted_out {
+            return Err(format!(
+                "{stage} {}: the replay ran the opt-out handler ({} before, {} after)",
+                state.instance, previous.opted_out, state.opted_out
+            ));
+        }
     }
     Ok(format!(
         "the hub executed a paused reset of {processor} on {executor} ({} ranges, {} markers deleted, {} handler), replayed {} until {} after resume, and the opt-out handler did not run again",
@@ -1444,6 +1514,8 @@ async fn dead_letter_scenario(
         ));
     }
 
+    let retried_instance = report.instance_id.clone();
+    let parking_instance = instance(park, family);
     let started = tokio::time::Instant::now();
     loop {
         let observed = states(peer, keys, languages, family, std::slice::from_ref(&id)).await?;
@@ -1455,22 +1527,32 @@ async fn dead_letter_scenario(
                 && state.dead_letter_total == 0
         });
         let handled = observed.iter().any(|state| {
-            state
-                .deliveries
-                .iter()
-                .any(|delivery| delivery.id == id && delivery.outcome == "handled")
+            state.instance == retried_instance
+                && state
+                    .deliveries
+                    .iter()
+                    .any(|delivery| delivery.id == id && delivery.outcome == "handled")
         });
         let marked = observed
             .iter()
             .all(|state| state.markers.get(&id) == Some(&true));
-        if gone && handled && marked {
+        let parking = observed
+            .iter()
+            .find(|state| state.instance == parking_instance)
+            .ok_or_else(|| format!("{parking_instance} is not in the state replies"))?;
+        let parking_ok = !parking
+            .dead_letters
+            .iter()
+            .any(|letter| letter.id == report.letter_id)
+            && parking.markers.get(&id) == Some(&true);
+        if gone && handled && marked && parking_ok {
             return Ok(format!(
-                "{park} parked a letter on {family} and the hub retried it on {retried}: {id}"
+                "{park} parked a letter on {family} and the hub retried it on {retried_instance}: {id}"
             ));
         }
         if started.elapsed() >= Duration::from_secs(60) {
             return Err(format!(
-                "{processor}: the retried letter {id} is gone {gone}, handled {handled}, marked {marked}: {observed:?}"
+                "{processor}: the retried letter {id} is gone {gone}, handled by {retried_instance} {handled}, marked {marked}, the parking instance {parking_instance} ok {parking_ok}: {observed:?}"
             ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1526,7 +1608,6 @@ async fn retry_all_scenario(
     {
         return Err(format!("POST retry-all {processor}: {status} {body}"));
     }
-    tokio::time::sleep(Duration::from_secs(1)).await;
     let observed = states(peer, keys, languages, family, &[]).await?;
     for state in &observed {
         if state.dead_letter_total != ids.len() as i64 {
@@ -1646,10 +1727,10 @@ async fn dlt_scenario(
                     event.payload
                 ));
             }
-            let (_, letters) = api.letters(&processor, 50).await?;
-            if letters.get("code").and_then(|v| v.as_str()) != Some("INVALID") {
+            let (status, letters) = api.letters(&processor, 50).await?;
+            if status != 400 || letters.get("code").and_then(|v| v.as_str()) != Some("INVALID") {
                 return Err(format!(
-                    "{processor}: the hub lists dead letters in event-store mode: {letters}"
+                    "{processor}: the hub lists dead letters in event-store mode ({status}): {letters}"
                 ));
             }
             if state
@@ -1690,14 +1771,29 @@ async fn dlt_scenario(
 async fn reset_unsupported_scenario(api: &Api) -> Res<String> {
     let processor = processor_name("rabbitmq");
     let (status, _, body) = api.reset(&processor, json!("earliest")).await?;
-    if status != 409 || body.get("code").and_then(|v| v.as_str()) != Some("UNSUPPORTED") {
-        return Err(format!("POST reset {processor}: {status} {body}"));
+    let message = body
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let asked = body
+        .get("instances")
+        .and_then(|v| v.as_array())
+        .is_some_and(|instances| !instances.is_empty());
+    let executed = body.get("executedBy").is_some_and(|value| !value.is_null());
+    if status != 409
+        || body.get("code").and_then(|v| v.as_str()) != Some("UNSUPPORTED")
+        || !message.contains("rabbitmq-streams")
+        || !message.contains("replay")
+        || asked
+        || executed
+    {
+        return Err(format!(
+            "POST reset {processor}: {status} {body} (capability named: {}, instances asked: {asked}, executed: {executed})",
+            message.contains("rabbitmq-streams")
+        ));
     }
     Ok(format!(
-        "the hub refused the reset of {processor} with 409 UNSUPPORTED: {}",
-        body.get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
+        "the hub refused the reset of {processor} with 409 UNSUPPORTED before asking any instance, naming the missing capability: {message}"
     ))
 }
 
@@ -1899,6 +1995,38 @@ async fn wait_letter(
             ));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// Polls for `window` and fails if any instance records a delivery of one of `ids`: a bounded
+/// absence check while a processor is paused, never one fixed sleep.
+async fn assert_not_delivered(
+    peer: &Peer,
+    keys: &BTreeMap<String, String>,
+    languages: &[String],
+    family: &str,
+    ids: &[String],
+    window: Duration,
+) -> Res<()> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let observed = states(peer, keys, languages, family, &[]).await?;
+        for state in &observed {
+            if let Some(delivery) = state
+                .deliveries
+                .iter()
+                .find(|delivery| ids.contains(&delivery.id))
+            {
+                return Err(format!(
+                    "{} delivered {} ({:?})",
+                    state.instance, delivery.id, delivery.outcome
+                ));
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 

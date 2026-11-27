@@ -17,8 +17,9 @@
 # PYTHON_REF to v0.6.0, the released tags that carry the conformance and store-interop services).
 # The stores profile also reads INTEROP_RUN (the unique token of the run; default generated) and
 # INTEROP_HUB_WRITE_TOKEN (the dashboard write credential the control scenarios use; default
-# snodra-interop-write-token). Its processor-control scenarios need GO_SRC and PYTHON_SRC until a
-# release carries the processor-control ports: the released refs answer the level-2 commands only.
+# snodra-interop-write-token). The stores profile requires GO_SRC and PYTHON_SRC until a release
+# carries the processor-control ports (it exits 2 when either is unset: the released refs answer the
+# level-2 commands only), and its --strict changes nothing because every scenario is required.
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
 # were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
@@ -84,7 +85,8 @@ case "$profile" in
     run="${INTEROP_RUN:-$(date +%s)$$}"
     export INTEROP_RUN="$run"
     if [[ -z "${GO_SRC:-}" || -z "${PYTHON_SRC:-}" ]]; then
-      echo "run.sh --profile stores: the processor-control scenarios need GO_SRC and PYTHON_SRC; the released refs carry the level-2 probe only" >&2
+      echo "run.sh --profile stores: GO_SRC and PYTHON_SRC are required; the released refs carry the level-2 probe only" >&2
+      exit 2
     fi
     compose --profile stores up -d --build --wait hub store-go store-python
     status=0
