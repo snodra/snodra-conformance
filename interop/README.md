@@ -34,8 +34,8 @@ exchange into a failure with a non-zero exit. Two runs on one host need differen
 |---|---|
 | `images/rust` | `reference-service` of this repository, on the `snodra-messaging` release pinned in `Cargo.lock` |
 | `images/kotlin` | `examples/conformance-service` of [snodra-messaging](https://github.com/snodra/snodra-messaging) at the tag `KOTLIN_REF` (default `v0.6.1`) |
-| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.6.0`) |
-| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.7.0`) |
+| `images/go` | `examples/conformance-service` of [snodra-messaging-go](https://github.com/snodra/snodra-messaging-go) at the tag `GO_REF` (default `v0.7.0`) |
+| `images/python` | `examples/conformance-service` of [snodra-messaging-python](https://github.com/snodra/snodra-messaging-python) at the tag `PYTHON_REF` (default `v0.8.0`) |
 
 The harness runs the released tags of the three published libraries (Go, Kotlin, Python) by default, and
 the Rust reference service on the `snodra-messaging` release this repository pins.
@@ -77,19 +77,17 @@ the Rust reference service on the `snodra-messaging` release this repository pin
 `interop/run.sh --profile stores` proves the shared **brokers and stores** instead of the hub's routing,
 and then drives the hub's **processor control plane** against the two services. It currently supports
 `LANGUAGES=go,python` only: the Kotlin and Rust store-interop services do not exist yet (see "Known
-limits"). The saga scenarios need the local L4 checkouts: the released tags carry the level-3 probe
-but not the saga commands. With local checkouts:
+limits"). The saga scenarios run from the released tags: Go `v0.7.0` and Python `v0.8.0` carry the
+level-4 probe and its saga commands.
 
 ```sh
 unset DOCKER_HOST                          # Docker Desktop; on Rancher Desktop set unix://$HOME/.rd/docker.sock
 SNODRA_HUB_PORT=17000 INTEROP_STRICT=1 LANGUAGES=go,python \
-  GO_SRC=~/src/snodra-messaging-go PYTHON_SRC=~/src/snodra-messaging-python \
   interop/run.sh --profile stores
 ```
 
-The stores profile requires both `GO_SRC` and `PYTHON_SRC`; `run.sh` exits 2 when either is unset.
-The released tags can be used by the exchange profile; the stores profile's saga scenarios need the
-saga probe commands of the local checkouts.
+`GO_SRC` and `PYTHON_SRC` run a local checkout instead of the released tags, for example
+`GO_SRC=~/src/snodra-messaging-go PYTHON_SRC=~/src/snodra-messaging-python interop/run.sh --profile stores`.
 
 The profile starts one Kafka KRaft broker, RabbitMQ with the stream plugin, PostgreSQL, MySQL and a
 single-node MongoDB replica set. The broker and database images are pinned by digest, and the two probe
@@ -203,8 +201,8 @@ commands publish the events, read the shared saga state/dispatch/lease and the l
 A raw probe subscription to each family source records a published `snodra.SagaCommandFailed` (the
 notice is local, so it stays empty) and, on RabbitMQ, a second subscription reads the dead-letter
 source. `images/store-go` and `images/store-python` build them from `GO_REF` / `PYTHON_REF` (the
-released tags `v0.6.0` and `v0.7.0`), or from `GO_SRC` / `PYTHON_SRC`, which override the tags. The
-released tags carry the level-3 probe; the saga scenarios need the local checkouts. The Python probe
+released tags `v0.7.0` and `v0.8.0`), or from `GO_SRC` / `PYTHON_SRC`, which override the tags. The
+released tags carry the level-4 probe and its saga commands. The Python probe
 reports its status every 4 s (the Go one keeps the 5 s default), so the two report phases drift and
 the driver can wait for either language to be the freshest instance the hub picks for a reset or a
 dead-letter call. `run.sh` stops every container and anonymous volume it started; the topics,
@@ -221,10 +219,6 @@ streams and databases live only in those containers, so a finished run leaves no
   assertions become per pair. The scenarios keep their shape. The saga records on SQL and MongoDB
   use the same layouts those libraries implement; the cross-language saga run is Go/Python until
   their store-interop services exist.
-
-- **The stores profile requires local checkouts.** The released tags carry the level-3 probe but not
-  the `Saga*` commands; `run.sh --profile stores` exits 2 when `GO_SRC` or `PYTHON_SRC` is unset.
-  Run the exchange profile with released tags if only the routing matrix is wanted.
 
 - **The event-store dead-letter mode is proved on RabbitMQ.** The `rabbitmq` family publishes to its
   `.dlt` super stream and the probe subscribes there; the Kafka families stay in `collection` mode, so

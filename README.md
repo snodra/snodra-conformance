@@ -53,8 +53,8 @@ ranges and positions, dead-letter retry (including a letter one language parks a
 `retry-all` and discard, and the event-store dead-letter mode. Its saga scenarios continue one saga
 across the languages on shared PostgreSQL and MongoDB, prove the dispatch lease exclusive across
 them, fire a deadline scheduled by one in the other, and deliver a command-failure notice in the
-other language locally. The stores profile requires local checkouts (`GO_SRC`, `PYTHON_SRC`): the
-released tags carry the level-3 probe but not the saga commands. See
+other language locally. The stores profile runs the released tags, which carry the level-4 probe and
+its saga commands; `GO_SRC` and `PYTHON_SRC` run a local checkout instead. See
 [interop/README.md](interop/README.md) for the command, the scenarios and the exact assertions.
 
 ## Run it
