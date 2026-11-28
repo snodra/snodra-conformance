@@ -178,6 +178,13 @@ async fn dispatch_lease(
     // The service handles SagaSlow itself and never routes it through the hub, so the instance
     // that runs the handler is the relay that holds the dispatch lease; its notification names
     // that language. The other language's probe must be refused while the entry is pending.
+    // Answer the slow handler's Send on every path: a failed wait, dispatch or lease call must not
+    // leave it blocked (and the relay's lease held) during teardown. The success path answers true.
+    let mut slow = SlowReply {
+        peer,
+        saga_id: saga_id.clone(),
+        released: Vec::new(),
+    };
     let (notice_id, noticed) = wait_notification(peer, &saga_id, Duration::from_secs(30)).await?;
     let holder = noticed
         .get("language")
@@ -215,7 +222,7 @@ async fn dispatch_lease(
     }
     // The slow handler is waiting for this answer; releasing it lets the command return, the relay
     // mark it sent and release the lease.
-    peer.answer(&notice_id, &json!({"released": true}));
+    slow.release(&notice_id);
 
     wait_dispatch_sent(
         peer,
@@ -265,9 +272,9 @@ async fn dispatch_lease(
     ))
 }
 
-/// A saga started on one language's partition schedules a deadline; the scenario alternates the
-/// starting language so a scheduler that consistently wins is the *other* language of the saga it
-/// fires. It still asserts the scheduling and firing languages explicitly.
+/// A saga started on one language's partition schedules a deadline; the scenario shifts its due
+/// time across a full scheduler period, so the other language's poll is earlier for one of the
+/// offsets. It still asserts the scheduling and firing languages explicitly.
 async fn deadline(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
@@ -276,18 +283,13 @@ async fn deadline(
     family: &str,
     first: &str,
 ) -> Res<String> {
-    let second = languages
-        .iter()
-        .find(|language| language.as_str() != first)
-        .ok_or_else(|| format!("{family}: no language other than {first}"))?
-        .clone();
     let mut last = String::from("no saga");
-    for attempt in 0..6 {
-        let starter = if attempt % 2 == 0 {
-            first
-        } else {
-            second.as_str()
-        };
+    for attempt in 0..20 {
+        // Keep the scheduling language fixed and shift the due time across a full scheduler
+        // period: the scheduler that wins is the one whose next poll is earlier, and with two
+        // phases one side of the period belongs to the other language.
+        let starter = first;
+        let delay_ms = 1100 + i64::from(attempt) * 50;
         let owners = stores::ready(peer, keys, languages, family, run).await?;
         let (start_partition, _) = partition_owned(&owners, starter)?;
         let start_key = stores::key_on_partition(
@@ -309,6 +311,7 @@ async fn deadline(
             "started",
             &order,
             "deadline",
+            delay_ms,
         )
         .await?;
         let state = wait_saga(
@@ -338,6 +341,11 @@ async fn deadline(
         )
         .await?;
         let fired_by = text(&fired, "deadlineFiredBy").unwrap_or_default();
+        if !languages.iter().any(|language| language == fired_by) {
+            return Err(format!(
+                "{family}: the deadline fired in the unknown language {fired_by:?}: {fired}"
+            ));
+        }
         if text(&fired, "startedBy") != Some(starter)
             || text(&fired, "deadlineScheduledBy") != Some(starter)
         {
@@ -354,7 +362,7 @@ async fn deadline(
         last = format!("fired by {fired_by}");
     }
     Err(format!(
-        "{family}: no deadline fired in a language other than its scheduler within 6 sagas ({last})"
+        "{family}: no deadline fired in a language other than its scheduler within 20 due times ({last})"
     ))
 }
 
@@ -410,9 +418,10 @@ async fn command_failed(
         if reason != "INVALID"
             || command_type != FAIL_TYPE
             || !key.starts_with(&format!("{saga_id}:"))
+            || number(&state, "notices") != 1
         {
             return Err(format!(
-                "{family}: the notice is not the expected INVALID of {FAIL_TYPE}: {state}"
+                "{family}: the notice is not exactly one INVALID of {FAIL_TYPE}: {state}"
             ));
         }
         let first = saga_notice(
@@ -451,7 +460,7 @@ async fn command_failed(
         ));
     }
     Err(format!(
-        "{family}: no notice was delivered by a language other than {recorder} within 6 sagas ({last})"
+        "{family}: no notice was delivered by a language other than {recorder} within 20 due times ({last})"
     ))
 }
 
@@ -499,6 +508,7 @@ async fn start_and_advance(
             "started",
             &order,
             mode,
+            0,
         )
         .await?;
         let state = wait_saga(
@@ -544,6 +554,7 @@ async fn start_and_advance(
             "advanced",
             &order,
             mode,
+            0,
         )
         .await?;
         let state = wait_saga(
@@ -597,6 +608,7 @@ async fn publish(
     kind: &str,
     order: &str,
     mode: &str,
+    delay_ms: i64,
 ) -> Res<()> {
     let routing = keys
         .get(instance)
@@ -608,7 +620,7 @@ async fn publish(
             Some(routing),
             json!({
                 "family": family, "run": run, "id": id, "key": key,
-                "kind": kind, "orderId": order, "mode": mode,
+                "kind": kind, "orderId": order, "mode": mode, "deadlineDelayMs": delay_ms,
             }),
         ),
     )
@@ -892,6 +904,37 @@ async fn saga_notice(
         ));
     }
     Ok(reply)
+}
+
+/// Answers the slow command's `SlowStarted` send exactly once: `release` on the success path, and
+/// a false answer from `Drop` if the scenario fails while the probe is still waiting.
+struct SlowReply<'a> {
+    peer: &'a Peer,
+    saga_id: String,
+    released: Vec<String>,
+}
+
+impl SlowReply<'_> {
+    fn release(&mut self, request_id: &str) {
+        self.peer.answer(request_id, &json!({"released": true}));
+        self.released.push(request_id.to_string());
+    }
+}
+
+impl Drop for SlowReply<'_> {
+    fn drop(&mut self) {
+        for seen in self.peer.seen() {
+            if seen.r#type != SLOW_STARTED_TYPE {
+                continue;
+            }
+            let value = wire::json(&seen.payload);
+            if value.get("sagaId").and_then(Value::as_str) == Some(&self.saga_id)
+                && !self.released.iter().any(|id| id == &seen.id)
+            {
+                self.peer.answer(&seen.id, &json!({"released": false}));
+            }
+        }
+    }
 }
 
 fn text<'a>(state: &'a Value, name: &str) -> Option<&'a str> {

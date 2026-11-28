@@ -173,9 +173,9 @@ The driver asserts, and prints one `ok` line per scenario; every one is required
     free; the probe claims it, then releases it through a witness claim. The slow handler ran once.
 20. **A deadline scheduled by one language fires in the other.** The start handler schedules
     `saga-timeout`; the shared scheduler claims it, and the state names the language that fired it.
-    The scenario alternates the starting language, bounded, so a scheduler that consistently wins is
-    the other language of the saga it fires; it asserts `startedBy` and `deadlineScheduledBy` in the
-    final state.
+    The scenario shifts the deadline's due time across a full scheduler period, bounded, so the
+    other language's poll is earlier for one offset; it asserts `startedBy` and
+    `deadlineScheduledBy` in the final state and that `deadlineFiredBy` is a known language.
 21. **A command given up in one language produces its notice in the other.** Python records a
     command whose handler returns `INVALID_REQUEST`; the relay that sends it may be either language,
     and the scenario retries fresh sagas until the notice lands in the other. The saga's state
