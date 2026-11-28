@@ -36,6 +36,10 @@ struct SagaStateReply {
     saga_id: Option<String>,
     #[serde(default)]
     state: Option<Value>,
+    #[serde(default)]
+    version: i64,
+    #[serde(default)]
+    live: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,10 +124,25 @@ async fn continuation(
         .state
         .as_ref()
         .ok_or_else(|| format!("{family}: the saga has no state"))?;
+    if text(state, "startedBy") != Some(starter)
+        || text(state, "advancedBy") != Some(continuer)
+        || number(state, "advances") != 1
+        || saga.version != 1
+        || saga.live != 1
+    {
+        return Err(format!(
+            "{family}: the continuation is not exactly-once (live {}, version {}, advances {}): {state}",
+            saga.live,
+            saga.version,
+            number(state, "advances")
+        ));
+    }
     Ok(format!(
-        "{starter} started and {continuer} continued {SAGA_TYPE} {} on {family} (order {order}, advances {})",
+        "{starter} started and {continuer} continued {SAGA_TYPE} {} on {family} exactly once (order {order}, advances {}, version {}, live {})",
         saga.saga_id.clone().unwrap_or_default(),
-        number(state, "advances")
+        number(state, "advances"),
+        saga.version,
+        saga.live
     ))
 }
 
@@ -156,7 +175,10 @@ async fn dispatch_lease(
         ));
     }
 
-    let noticed = wait_notification(peer, &saga_id, Duration::from_secs(30)).await?;
+    // The service handles SagaSlow itself and never routes it through the hub, so the instance
+    // that runs the handler is the relay that holds the dispatch lease; its notification names
+    // that language. The other language's probe must be refused while the entry is pending.
+    let (notice_id, noticed) = wait_notification(peer, &saga_id, Duration::from_secs(30)).await?;
     let holder = noticed
         .get("language")
         .and_then(Value::as_str)
@@ -191,6 +213,9 @@ async fn dispatch_lease(
             "{family}: {other}'s probe took the dispatch lease while {holder}'s relay held it"
         ));
     }
+    // The slow handler is waiting for this answer; releasing it lets the command return, the relay
+    // mark it sent and release the lease.
+    peer.answer(&notice_id, &json!({"released": true}));
 
     wait_dispatch_sent(
         peer,
@@ -240,18 +265,29 @@ async fn dispatch_lease(
     ))
 }
 
-/// A saga started on `starter`'s partition schedules a deadline; the scenario retries fresh sagas
-/// until the scheduler of the other language fires it.
+/// A saga started on one language's partition schedules a deadline; the scenario alternates the
+/// starting language so a scheduler that consistently wins is the *other* language of the saga it
+/// fires. It still asserts the scheduling and firing languages explicitly.
 async fn deadline(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
     languages: &[String],
     run: &str,
     family: &str,
-    starter: &str,
+    first: &str,
 ) -> Res<String> {
+    let second = languages
+        .iter()
+        .find(|language| language.as_str() != first)
+        .ok_or_else(|| format!("{family}: no language other than {first}"))?
+        .clone();
     let mut last = String::from("no saga");
     for attempt in 0..6 {
+        let starter = if attempt % 2 == 0 {
+            first
+        } else {
+            second.as_str()
+        };
         let owners = stores::ready(peer, keys, languages, family, run).await?;
         let (start_partition, _) = partition_owned(&owners, starter)?;
         let start_key = stores::key_on_partition(
@@ -261,7 +297,7 @@ async fn deadline(
             &format!("saga-deadline-{starter}-{attempt}"),
         )?;
         let order = format!("saga-{run}-{family}-deadline-{starter}-{attempt}");
-        let start_id = format!("saga-start-{run}-{family}-deadline-{attempt}");
+        let start_id = format!("saga-start-{run}-{family}-deadline-{starter}-{attempt}");
         publish(
             peer,
             keys,
@@ -302,6 +338,13 @@ async fn deadline(
         )
         .await?;
         let fired_by = text(&fired, "deadlineFiredBy").unwrap_or_default();
+        if text(&fired, "startedBy") != Some(starter)
+            || text(&fired, "deadlineScheduledBy") != Some(starter)
+        {
+            return Err(format!(
+                "{family}: the deadline state lost the starter/scheduler: {fired}"
+            ));
+        }
         if fired_by != starter {
             return Ok(format!(
                 "a deadline scheduled by {starter} in {order} on {family} fired in {fired_by} (scheduled by {})",
@@ -311,7 +354,7 @@ async fn deadline(
         last = format!("fired by {fired_by}");
     }
     Err(format!(
-        "{family}: no deadline scheduled by {starter} fired in another language within 6 sagas ({last})"
+        "{family}: no deadline fired in a language other than its scheduler within 6 sagas ({last})"
     ))
 }
 
@@ -372,7 +415,6 @@ async fn command_failed(
                 "{family}: the notice is not the expected INVALID of {FAIL_TYPE}: {state}"
             ));
         }
-        let notice_id = format!("failed:{key}");
         let first = saga_notice(
             peer,
             keys,
@@ -380,7 +422,6 @@ async fn command_failed(
             family,
             run,
             &saga_id,
-            &notice_id,
         )
         .await?;
         let second = saga_notice(
@@ -390,7 +431,6 @@ async fn command_failed(
             family,
             run,
             &saga_id,
-            &notice_id,
         )
         .await?;
         let ordinary = first.ordinary + second.ordinary;
@@ -475,6 +515,22 @@ async fn start_and_advance(
         if text(&state, "startedBy") != Some(starter) {
             last = format!("started by {:?}", text(&state, "startedBy"));
             continue;
+        }
+        let reply = saga_state(
+            peer,
+            keys,
+            &stores::instance(starter, family),
+            family,
+            run,
+            &order,
+        )
+        .await?
+        .ok_or_else(|| format!("{family}: the saga of {order} disappeared after the start"))?;
+        if reply.live != 1 || reply.version != 0 {
+            return Err(format!(
+                "{family}: the start of {order} is not exactly-once (live {}, version {}): {reply:?}",
+                reply.live, reply.version
+            ));
         }
         let advance_id = format!("saga-advance-{run}-{family}-{advancer}-{salt}-{attempt}");
         publish(
@@ -787,14 +843,14 @@ async fn wait_lease_free(
     }
 }
 
-async fn wait_notification(peer: &Peer, saga_id: &str, limit: Duration) -> Res<Value> {
+async fn wait_notification(peer: &Peer, saga_id: &str, limit: Duration) -> Res<(String, Value)> {
     let deadline = tokio::time::Instant::now() + limit;
     loop {
         for seen in peer.seen() {
             if seen.r#type == SLOW_STARTED_TYPE {
                 let value = wire::json(&seen.payload);
                 if value.get("sagaId").and_then(Value::as_str) == Some(saga_id) {
-                    return Ok(value);
+                    return Ok((seen.id.clone(), value));
                 }
             }
         }
@@ -814,7 +870,6 @@ async fn saga_notice(
     family: &str,
     run: &str,
     saga_id: &str,
-    notice_id: &str,
 ) -> Res<SagaNoticeReply> {
     let routing = keys
         .get(instance)
@@ -824,9 +879,7 @@ async fn saga_notice(
         command(
             "orders.interop.SagaNotice",
             Some(routing),
-            json!({
-                "family": family, "run": run, "sagaId": saga_id, "noticeId": notice_id,
-            }),
+            json!({"family": family, "run": run, "sagaId": saga_id}),
         ),
     )
     .await?;

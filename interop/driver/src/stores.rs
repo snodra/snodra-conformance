@@ -310,7 +310,13 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
             ],
             ..Registration::default()
         },
-        |peer, request| peer.answer(&request.id, &json!({ "probe": true })),
+        |peer, request| {
+            // The slow command's Send waits for the saga scenario, which answers it after probing
+            // the dispatch lease from the other language.
+            if request.r#type != "store.runner.SlowStarted" {
+                peer.answer(&request.id, &json!({ "probe": true }));
+            }
+        },
     )
     .await?;
     let keys = find_keys(&peer, &instances).await?;
