@@ -13,13 +13,11 @@
 # non-zero when a required exchange or scenario could not be exercised), LOCAL_SENDERS (languages
 # whose service answers a unary send to a type it handles itself without the hub, comma-separated;
 # default none: every official service here sends through the hub), GO_REF / GO_SRC, KOTLIN_REF /
-# KOTLIN_SRC and PYTHON_REF / PYTHON_SRC (see compose.yaml; GO_REF defaults to v0.6.0 and
-# PYTHON_REF to v0.7.0, the released tags that carry the conformance and level-3 store-interop
-# probes). The stores profile requires GO_SRC and PYTHON_SRC: it exits 2 when either is unset,
-# because the saga scenarios need the probe commands the released tags do not carry yet. It also
-# reads INTEROP_RUN (the unique token of the run; default generated) and INTEROP_HUB_WRITE_TOKEN
+# KOTLIN_SRC and PYTHON_REF / PYTHON_SRC (see compose.yaml; GO_REF defaults to v0.7.0 and
+# PYTHON_REF to v0.8.0, the released tags that carry the conformance and level-4 store-interop
+# probes). The stores profile's --strict changes nothing because every scenario is required. It
+# also reads INTEROP_RUN (the unique token of the run; default generated) and INTEROP_HUB_WRITE_TOKEN
 # (the dashboard write credential the control scenarios use; default snodra-interop-write-token).
-# The stores profile's --strict changes nothing because every scenario is required.
 # Exit 0 only when every exchange it ran passed. The summary line names the required exchanges that
 # were not exercised (those of the LOCAL_SENDERS); with INTEROP_STRICT=1 any such exchange is a failure.
 set -euo pipefail
@@ -84,10 +82,6 @@ case "$profile" in
     fi
     run="${INTEROP_RUN:-$(date +%s)$$}"
     export INTEROP_RUN="$run"
-    if [[ -z "${GO_SRC:-}" || -z "${PYTHON_SRC:-}" ]]; then
-      echo "run.sh --profile stores: GO_SRC and PYTHON_SRC are required; the released tags carry the level-3 probe, not the saga commands" >&2
-      exit 2
-    fi
     compose --profile stores up -d --build --wait hub store-go store-python
     status=0
     cargo run -q -p snodra-interop -- stores --hub "127.0.0.1:$port" --hub-api "127.0.0.1:$http_port" --languages "$languages" --run "$run" ${strict[@]+"${strict[@]}"} || status=$?
