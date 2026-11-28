@@ -47,6 +47,9 @@ const EVENT_TYPE: &str = "orders.OrderPlaced";
 /// directions and each language alone), retry-all and discard, the event-store dead-letter mode,
 /// and a reset the hub refuses for the missing capability.
 const L3_SCENARIOS: usize = 13;
+/// The cross-language saga scenarios after the control ones: two continuations, the dispatch
+/// lease, the deadline and the local command-failure notice.
+const SAGA_SCENARIOS: usize = 5;
 
 #[derive(ClapArgs)]
 pub struct StoresArgs {
@@ -188,13 +191,13 @@ struct Delivery {
     outcome: String,
 }
 
-#[derive(Clone)]
-struct Owner {
-    instance: String,
-    language: String,
+#[derive(Debug, Clone)]
+pub(crate) struct Owner {
+    pub(crate) instance: String,
+    pub(crate) language: String,
 }
 
-fn instance(language: &str, family: &str) -> String {
+pub(crate) fn instance(language: &str, family: &str) -> String {
     format!("{language}-{family}")
 }
 
@@ -216,7 +219,12 @@ fn processor_name(family: &str) -> String {
 }
 
 /// A fresh key that lands on `partition` of the family's source, by the family's own rule.
-fn key_on_partition(family: &str, run: &str, partition: &str, salt: &str) -> Res<String> {
+pub(crate) fn key_on_partition(
+    family: &str,
+    run: &str,
+    partition: &str,
+    salt: &str,
+) -> Res<String> {
     let want = partition
         .parse::<usize>()
         .map_err(|_| format!("partition {partition:?} is not a number"))?;
@@ -296,7 +304,10 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
         &args.hub,
         Registration {
             service: "store-runner".into(),
-            commands: vec!["store.runner.Probe".into()],
+            commands: vec![
+                "store.runner.Probe".into(),
+                "store.runner.SlowStarted".into(),
+            ],
             ..Registration::default()
         },
         |peer, request| peer.answer(&request.id, &json!({ "probe": true })),
@@ -390,6 +401,11 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
     println!("ok   reset: {line}");
     scenarios += 1;
 
+    for line in crate::saga::run(&peer, &keys, &languages, &args.run).await? {
+        println!("ok   saga: {line}");
+        scenarios += 1;
+    }
+
     println!(
         "ok   names: sources {} (run {}), one database {} for {}",
         FAMILIES
@@ -401,7 +417,7 @@ pub async fn run(args: &StoresArgs) -> Res<()> {
         database_name(&args.run),
         SHARED.join(", ")
     );
-    let expected = FAMILIES.len() + SHARED.len() + L3_SCENARIOS;
+    let expected = FAMILIES.len() + SHARED.len() + L3_SCENARIOS + SAGA_SCENARIOS;
     if scenarios != expected {
         return Err(format!(
             "{} of {expected} scenarios ran; the stores profile requires every one",
@@ -693,7 +709,7 @@ fn partition_of(family: &str, key: &str, partitions: usize) -> usize {
 }
 
 /// Wait until the two languages own one partition each, and return the owner of every segment.
-async fn ready(
+pub(crate) async fn ready(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
     languages: &[String],

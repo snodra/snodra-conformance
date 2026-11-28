@@ -5,6 +5,7 @@
 
 mod hub;
 mod matrix;
+mod saga;
 mod stores;
 
 use std::collections::BTreeMap;
