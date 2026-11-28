@@ -597,6 +597,7 @@ fn partition_owned(owners: &BTreeMap<String, Owner>, language: &str) -> Res<(Str
         .ok_or_else(|| format!("{language} never owned a partition: {owners:?}"))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn publish(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
@@ -669,6 +670,7 @@ async fn saga_state(
     Ok(reply.found.then_some(reply))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn wait_saga(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
@@ -754,6 +756,7 @@ async fn wait_dispatch_sent(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn saga_lease(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
@@ -821,6 +824,7 @@ async fn saga_release(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn wait_lease_free(
     peer: &Peer,
     keys: &BTreeMap<String, String>,
